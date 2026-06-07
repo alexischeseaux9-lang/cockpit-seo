@@ -351,7 +351,7 @@ Structure: hero, 3 trust badges (SVG inline), story (2-3 paragraphes), grille de
 Utilise la couleur d'accent ${accent} dans les badges et separateurs.`;
   const msg = await c.messages.create({
     model: SONNET,
-    max_tokens: 6000,
+    max_tokens: 14000,
     system: sys,
     messages: [
       {
