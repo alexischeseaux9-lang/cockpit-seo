@@ -1,10 +1,11 @@
 import { getServiceClient } from "@/lib/supabase";
+import Link from "next/link";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
-// Portail public en lecture seule. Le token EST l'autorisation. Aucune action possible.
-export default async function PortailPage({ params }: { params: { token: string } }) {
+// Portail public en lecture seule. Le token EST l'autorisation.
+export default async function PortailPage({ params, searchParams }: { params: { token: string }; searchParams: { kind?: string } }) {
   const supabase = getServiceClient();
   const { data: site } = await supabase
     .from("sites")
@@ -13,19 +14,21 @@ export default async function PortailPage({ params }: { params: { token: string 
     .maybeSingle();
 
   if (!site) {
-    return (
-      <main className="flex min-h-screen items-center justify-center bg-zinc-950 text-zinc-400">
-        Lien invalide.
-      </main>
-    );
+    return <main className="flex min-h-screen items-center justify-center bg-zinc-950 text-zinc-400">Lien invalide.</main>;
   }
 
-  const { data: optimizations } = await supabase
+  const kind = searchParams?.kind || "";
+  let q = supabase
     .from("site_optimizations")
     .select("kind, target_type, target_title, target_url, note, done_at")
     .eq("site_id", site.id)
     .order("done_at", { ascending: false })
-    .limit(100);
+    .limit(200);
+  if (kind) q = q.eq("kind", kind);
+  const { data: optimizations } = await q;
+
+  const { data: allKinds } = await supabase.from("site_optimizations").select("kind").eq("site_id", site.id);
+  const kinds = Array.from(new Set((allKinds || []).map((r) => r.kind)));
 
   const { count: published } = await supabase
     .from("blog_posts")
@@ -38,10 +41,17 @@ export default async function PortailPage({ params }: { params: { token: string 
       <div className="mx-auto max-w-2xl">
         <p className="text-xs uppercase tracking-wider text-zinc-500">Rapport de travail</p>
         <h1 className="mb-1 text-2xl font-semibold">{site.name}</h1>
-        <p className="mb-8 text-sm text-zinc-500">{site.url} · {published || 0} articles publies</p>
+        <p className="mb-6 text-sm text-zinc-500">{site.url} · {published || 0} articles publies</p>
+
+        <div className="mb-6 flex flex-wrap gap-2">
+          <Link href={`/portail/${params.token}`} className={`rounded-full border px-2.5 py-1 text-xs ${!kind ? "border-emerald-600 text-emerald-300" : "border-zinc-700 text-zinc-400"}`}>Tout</Link>
+          {kinds.map((k) => (
+            <Link key={k} href={`/portail/${params.token}?kind=${encodeURIComponent(k)}`} className={`rounded-full border px-2.5 py-1 text-xs ${kind === k ? "border-emerald-600 text-emerald-300" : "border-zinc-700 text-zinc-400"}`}>{k}</Link>
+          ))}
+        </div>
 
         <div className="space-y-2">
-          {(optimizations || []).length === 0 && <p className="text-sm text-zinc-500">Aucune activite pour le moment.</p>}
+          {(optimizations || []).length === 0 && <p className="text-sm text-zinc-500">Aucune activite.</p>}
           {(optimizations || []).map((o, i) => (
             <div key={i} className="rounded-lg border border-zinc-800 bg-zinc-900/40 p-3">
               <div className="flex items-center justify-between">

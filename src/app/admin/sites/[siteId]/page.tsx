@@ -186,7 +186,7 @@ export default function SiteDetail({ params }: { params: { siteId: string } }) {
         {password && tab === "roadmap" && <RoadmapTab siteId={siteId} site={site} api={api} setMsg={setMsg} onSiteChanged={loadSite} />}
         {password && tab === "profil" && <ProfilTab siteId={siteId} api={api} setMsg={setMsg} onSaved={loadSite} />}
         {password && tab === "image" && <ImageTab siteId={siteId} site={site} api={api} setMsg={setMsg} />}
-        {password && tab === "optimizations" && <HistoryTab siteId={siteId} api={api} />}
+        {password && tab === "optimizations" && <HistoryTab siteId={siteId} site={site} api={api} setMsg={setMsg} />}
       </div>
     </main>
   );
@@ -1322,22 +1322,99 @@ function ImageTab({ siteId, site, api, setMsg }: { siteId: string; site: any; ap
   );
 }
 
-function HistoryTab({ siteId, api }: { siteId: string; api: ApiFn }) {
+const OPTIM_KINDS = [
+  "meta_description", "meta_title", "product_description", "product_seo_meta", "collection_description",
+  "collection_image", "collection_optimized_draft", "collection_pushed_live", "image_alt", "internal_link",
+  "schema_markup", "redirect", "article_generated", "article_refreshed", "scro_injection_pushed", "product_reverted", "other",
+];
+const TARGET_TYPES = ["product", "collection", "article", "page", "site"];
+
+function HistoryTab({ siteId, site, api, setMsg }: { siteId: string; site: any; api: ApiFn; setMsg: (s: string | null) => void }) {
   const [items, setItems] = useState<any[]>([]);
-  useEffect(() => { api(`/api/admin/sites/${siteId}/optimizations`).then(({ ok, json }) => ok && setItems(json.optimizations || [])); }, [siteId, api]);
+  const [counters, setCounters] = useState<Record<string, number>>({});
+  const [total, setTotal] = useState(0);
+  const [fKind, setFKind] = useState("");
+  const [fType, setFType] = useState("");
+  const [showLogger, setShowLogger] = useState(false);
+  const [copied, setCopied] = useState(false);
+  const [form, setForm] = useState<any>({ kind: "other", target_type: "site", target_id: "", target_title: "", target_url: "", before_value: "", after_value: "", note: "" });
+
+  const load = useCallback(async () => {
+    const qs = new URLSearchParams();
+    if (fKind) qs.set("kind", fKind);
+    if (fType) qs.set("target_type", fType);
+    const { ok, json } = await api(`/api/admin/sites/${siteId}/optimizations?${qs}`);
+    if (ok) { setItems(json.optimizations || []); setCounters(json.counters || {}); setTotal(json.total || 0); }
+  }, [siteId, api, fKind, fType]);
+  useEffect(() => { load(); }, [load]);
+
+  async function save() {
+    const { ok, json } = await api(`/api/admin/sites/${siteId}/optimizations`, { method: "POST", body: JSON.stringify({ optimization: { ...form, source: "manual" } }) });
+    setMsg(ok ? "Optimisation enregistree." : `Erreur: ${json.error}`);
+    if (ok) { setShowLogger(false); load(); }
+  }
+  async function del(id: string) {
+    const { ok } = await api(`/api/admin/sites/${siteId}/optimizations?id=${id}`, { method: "DELETE" });
+    if (ok) load();
+  }
+  function copyPortal() {
+    const url = `${window.location.origin}/portail/${site?.client_view_token}`;
+    navigator.clipboard?.writeText(url); setCopied(true); setTimeout(() => setCopied(false), 2000);
+  }
+  const set = (k: string, v: string) => setForm((f: any) => ({ ...f, [k]: v }));
+
   return (
-    <div className="space-y-2">
-      {items.length === 0 && <p className="text-sm text-zinc-500">Aucune optimisation enregistree.</p>}
-      {items.map((o) => (
-        <div key={o.id} className="rounded-lg border border-zinc-800 bg-zinc-900/40 p-3">
-          <div className="flex items-center justify-between">
-            <span className="text-sm text-zinc-200">{o.target_title || o.kind}</span>
-            <span className="text-xs text-zinc-500">{new Date(o.done_at).toLocaleString()}</span>
-          </div>
-          <p className="text-xs text-zinc-500">{o.kind} · {o.target_type} {o.note ? `· ${o.note}` : ""}</p>
-          {o.target_url && <a href={o.target_url} target="_blank" rel="noreferrer" className="flex items-center gap-1 text-xs text-emerald-400">Voir <ExternalLink size={12} /></a>}
+    <div className="space-y-4">
+      <div className="flex items-center justify-between">
+        <p className="text-sm text-zinc-400">Log de tout ce qui a ete touche sur ce site ({total}).</p>
+        <div className="flex gap-2">
+          <button onClick={() => setShowLogger((v) => !v)} className={ghostBtn}><Plus size={12} /> Ajouter manuelle</button>
+          {site?.client_view_token && (
+            <button onClick={copyPortal} className={ghostBtn}>{copied ? <Check size={12} className="text-emerald-400" /> : <ExternalLink size={12} />} Lien portail</button>
+          )}
         </div>
-      ))}
+      </div>
+
+      <div className="flex flex-wrap gap-2">
+        {Object.entries(counters).filter(([, v]) => v > 0).map(([k, v]) => (
+          <button key={k} onClick={() => setFKind(fKind === k ? "" : k)} className={`rounded-full border px-2 py-0.5 text-[11px] ${fKind === k ? "border-emerald-600 text-emerald-300" : "border-zinc-700 text-zinc-400"}`}>{k}: {v}</button>
+        ))}
+      </div>
+
+      {showLogger && (
+        <div className={`${cardCls} space-y-2`}>
+          <div className="grid grid-cols-2 gap-2">
+            <select value={form.kind} onChange={(e) => set("kind", e.target.value)} className={inputCls}>{OPTIM_KINDS.map((k) => <option key={k} value={k}>{k}</option>)}</select>
+            <select value={form.target_type} onChange={(e) => set("target_type", e.target.value)} className={inputCls}>{TARGET_TYPES.map((k) => <option key={k} value={k}>{k}</option>)}</select>
+            <input value={form.target_title} onChange={(e) => set("target_title", e.target.value)} className={inputCls} placeholder="Titre cible" />
+            <input value={form.target_url} onChange={(e) => set("target_url", e.target.value)} className={inputCls} placeholder="URL cible" />
+          </div>
+          <textarea value={form.before_value} onChange={(e) => set("before_value", e.target.value)} rows={2} className={inputCls} placeholder="Avant" />
+          <textarea value={form.after_value} onChange={(e) => set("after_value", e.target.value)} rows={2} className={inputCls} placeholder="Apres" />
+          <textarea value={form.note} onChange={(e) => set("note", e.target.value)} rows={1} className={inputCls} placeholder="Note" />
+          <button onClick={save} className={primaryBtn}><Check size={14} /> Enregistrer</button>
+        </div>
+      )}
+
+      <div className="space-y-2">
+        {items.length === 0 && <p className="text-sm text-zinc-500">Aucune optimisation.</p>}
+        {items.map((o) => (
+          <div key={o.id} className="rounded-lg border border-zinc-800 bg-zinc-900/40 p-3">
+            <div className="flex items-center justify-between">
+              <span className="flex items-center gap-2 text-sm text-zinc-200">
+                {o.target_title || o.kind}
+                <span className={`rounded px-1.5 text-[10px] ${o.source === "ai" ? "bg-purple-950/40 text-purple-300" : o.source === "system" ? "bg-zinc-800 text-zinc-400" : "bg-zinc-700 text-zinc-200"}`}>{o.source}</span>
+              </span>
+              <div className="flex items-center gap-2">
+                <span className="text-xs text-zinc-500">{new Date(o.done_at).toLocaleString()}</span>
+                <button onClick={() => del(o.id)} className="text-zinc-500 hover:text-red-400"><Trash2 size={13} /></button>
+              </div>
+            </div>
+            <p className="text-xs text-zinc-500">{o.kind} · {o.target_type}{o.note ? ` · ${o.note}` : ""}</p>
+            {o.target_url && <a href={o.target_url} target="_blank" rel="noreferrer" className="text-xs text-emerald-400">Voir</a>}
+          </div>
+        ))}
+      </div>
     </div>
   );
 }
