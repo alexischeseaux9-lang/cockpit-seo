@@ -2,6 +2,7 @@ import Anthropic from "@anthropic-ai/sdk";
 import { SerpAnalysis } from "./serp";
 import { stripEmDashes, findAntiPatterns } from "./guards";
 import { logAnthropicUsage } from "./ai-usage";
+import { expandAntiAiPatterns } from "./anti-ai";
 
 const SONNET = process.env.CLAUDE_MODEL || "claude-sonnet-4-6";
 const HAIKU = "claude-haiku-4-5";
@@ -91,7 +92,7 @@ export async function writeArticle(
   const lang = voiceProfile.content_language || "francais";
   const persona = voiceProfile.mascot || voiceProfile.author_name;
   const extraBans = [
-    ...(Array.isArray(voiceProfile.anti_ai_patterns) ? voiceProfile.anti_ai_patterns : []),
+    ...expandAntiAiPatterns(voiceProfile.anti_ai_patterns),
     voiceProfile.anti_ai_custom,
   ].filter(Boolean).join(", ");
   const sys = `Tu es un redacteur SEO expert${persona ? ` qui ecrit sous la plume de ${persona}` : ""}. Tu ecris en ${lang}. ${STYLE_RULES}${

@@ -6,18 +6,44 @@ import { getServiceClient } from "@/lib/supabase";
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
-// GET: liste des jobs du site (recents d'abord)
+// GET: jobs du site (ordre priorite decroissante, puis FIFO) + compteurs par statut.
 export async function GET(req: NextRequest, { params }: { params: { siteId: string } }) {
   if (!isAdmin(req)) return unauthorized();
   const supabase = getServiceClient();
   const { data, error } = await supabase
     .from("site_jobs")
-    .select("id, kind, status, keyword, priority, error, output, created_at, completed_at")
+    .select("id, kind, status, keyword, brief, target_title, priority, error, output, created_at, completed_at")
     .eq("site_id", params.siteId)
-    .order("created_at", { ascending: false })
-    .limit(100);
+    .order("priority", { ascending: false })
+    .order("created_at", { ascending: true })
+    .limit(500);
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });
-  return NextResponse.json({ jobs: data });
+
+  const statuses = ["pending", "in_progress", "done", "error"] as const;
+  const counts: Record<string, number> = { pending: 0, in_progress: 0, done: 0, error: 0 };
+  await Promise.all(
+    statuses.map(async (st) => {
+      const { count } = await supabase
+        .from("site_jobs")
+        .select("id", { count: "exact", head: true })
+        .eq("site_id", params.siteId)
+        .eq("status", st);
+      counts[st] = count || 0;
+    }),
+  );
+
+  return NextResponse.json({ jobs: data, counts });
+}
+
+// DELETE: supprime un job de la roadmap (?id=...)
+export async function DELETE(req: NextRequest, { params }: { params: { siteId: string } }) {
+  if (!isAdmin(req)) return unauthorized();
+  const id = new URL(req.url).searchParams.get("id");
+  if (!id) return NextResponse.json({ error: "missing_id" }, { status: 400 });
+  const supabase = getServiceClient();
+  const { error } = await supabase.from("site_jobs").delete().eq("id", id).eq("site_id", params.siteId);
+  if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+  return NextResponse.json({ ok: true });
 }
 
 const itemSchema = z.object({

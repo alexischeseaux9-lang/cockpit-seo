@@ -2,26 +2,125 @@
 @tailwind components;
 @tailwind utilities;
 
+/*
+  Design system Cockpit SEO (dark only).
+  Tokens calques sur les screenshots Yavok :
+  fond quasi noir, cartes a bordure white-alpha subtile,
+  CTA primaire blanc/texte noir, emerald = sync/generation,
+  violet = generation d'image, rouge = destructif.
+  Regle projet : aucun em-dash ni emoji dans l'UI.
+*/
+
 :root {
-  --background: #ffffff;
-  --foreground: #171717;
+  --bg: #0a0a0b;
+  --bg-elev: #0e0e11;
+  --card: #121214;
+  --border: rgba(255, 255, 255, 0.08);
+  --border-strong: rgba(255, 255, 255, 0.14);
+  --fg: #fafafa;
+  --fg-muted: #a1a1aa;
+  --fg-subtle: #71717a;
+  --accent: #10b981;
+  --accent-fg: #34d399;
 }
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
-  }
+html,
+body {
+  background: var(--bg);
+  color: var(--fg);
 }
 
 body {
-  color: var(--foreground);
-  background: var(--background);
-  font-family: Arial, Helvetica, sans-serif;
+  font-family: var(--font-geist-sans), ui-sans-serif, system-ui, -apple-system,
+    "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+/* Scrollbars discretes, coherentes avec le dark mode */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: rgba(255, 255, 255, 0.12) transparent;
+}
+*::-webkit-scrollbar {
+  width: 9px;
+  height: 9px;
+}
+*::-webkit-scrollbar-thumb {
+  background: rgba(255, 255, 255, 0.12);
+  border-radius: 9999px;
+}
+*::-webkit-scrollbar-thumb:hover {
+  background: rgba(255, 255, 255, 0.2);
+}
+
+@layer components {
+  .eyebrow {
+    @apply text-[11px] font-medium uppercase tracking-[0.14em] text-zinc-500;
+  }
+
+  /* Carte de base : bordure white-alpha tres subtile + fond legerement eleve */
+  .card-base {
+    @apply rounded-xl border border-white/[0.07] bg-white/[0.02] p-4;
+  }
+  .card-hover {
+    @apply transition hover:border-white/[0.12] hover:bg-white/[0.035];
+  }
+
+  .input-base {
+    @apply w-full rounded-lg border border-white/10 bg-black/40 px-3 py-2 text-sm text-zinc-100 placeholder:text-zinc-600 outline-none transition focus:border-emerald-500/60 focus:ring-1 focus:ring-emerald-500/25;
+  }
+  textarea.input-base {
+    @apply resize-y leading-relaxed;
+  }
+
+  /* Boutons : CTA primaire = blanc sur noir (cf. screenshots) */
+  .btn-primary {
+    @apply inline-flex items-center justify-center gap-2 rounded-lg bg-white px-3.5 py-2 text-sm font-medium text-black transition hover:bg-zinc-200 disabled:cursor-not-allowed disabled:opacity-40;
+  }
+  .btn-emerald {
+    @apply inline-flex items-center justify-center gap-2 rounded-lg bg-emerald-600 px-3.5 py-2 text-sm font-medium text-white transition hover:bg-emerald-500 disabled:cursor-not-allowed disabled:opacity-40;
+  }
+  .btn-violet {
+    @apply inline-flex items-center justify-center gap-2 rounded-lg bg-violet-600 px-3.5 py-2 text-sm font-medium text-white transition hover:bg-violet-500 disabled:cursor-not-allowed disabled:opacity-40;
+  }
+  .btn-ghost {
+    @apply inline-flex items-center justify-center gap-2 rounded-lg border border-white/10 bg-white/[0.02] px-3 py-2 text-sm font-medium text-zinc-300 transition hover:border-white/20 hover:bg-white/[0.05] hover:text-white disabled:cursor-not-allowed disabled:opacity-40;
+  }
+  .btn-danger {
+    @apply inline-flex items-center justify-center gap-2 rounded-lg border border-red-500/30 bg-red-500/[0.06] px-3.5 py-2 text-sm font-medium text-red-300 transition hover:border-red-500/50 hover:bg-red-500/10 disabled:cursor-not-allowed disabled:opacity-40;
+  }
+  .btn-sm {
+    @apply px-2.5 py-1.5 text-xs;
+  }
+  .btn-icon {
+    @apply inline-flex h-9 w-9 items-center justify-center rounded-lg border border-white/10 bg-white/[0.02] text-zinc-400 transition hover:border-white/20 hover:bg-white/[0.05] hover:text-white disabled:opacity-40;
+  }
+
+  /* Pills de filtre : actif = blanc sur noir */
+  .pill {
+    @apply inline-flex items-center gap-1.5 rounded-full border border-white/10 px-3 py-1 text-xs font-medium text-zinc-400 transition hover:border-white/20 hover:text-zinc-200;
+  }
+  .pill-active {
+    @apply border-transparent bg-white text-black hover:text-black;
+  }
 }
 
 @layer utilities {
   .text-balance {
     text-wrap: balance;
+  }
+  /* Rendu lisible des descriptions HTML injectees (drawer produit / categorie) */
+  .prose-mini :where(p, ul, ol):not(:first-child) {
+    margin-top: 0.6rem;
+  }
+  .prose-mini ul {
+    list-style: disc;
+    padding-left: 1.1rem;
+  }
+  .prose-mini h2,
+  .prose-mini h3 {
+    font-weight: 600;
+    margin-top: 0.8rem;
   }
 }

@@ -3,37 +3,19 @@
 import { useCallback, useEffect, useState } from "react";
 import Link from "next/link";
 import {
-  ArrowLeft,
-  Loader2,
-  Play,
-  Plus,
-  FileText,
-  CheckCircle2,
-  ExternalLink,
-  Sparkles,
-  Image as ImageIcon,
-  Package,
-  FolderTree,
-  History,
-  User,
-  Wand2,
-  UploadCloud,
-  Undo2,
-  BarChart3,
-  Globe,
-  Archive,
-  ShoppingBag,
-  Map,
-  UserCircle,
-  Tag,
-  Zap,
-  ZapOff,
-  ListPlus,
-  Check,
-  Trash2,
-  ChevronRight,
+  ArrowLeft, RefreshCw, Loader2, Play, PlayCircle, Plus, ListPlus, FileText,
+  CheckCircle2, Check, X, ExternalLink, Sparkles, Image as ImageIcon, Package,
+  FolderTree, History, User, UserCircle, Wand2, UploadCloud, Undo2, BarChart3,
+  Globe, Archive, ShoppingBag, Map, Tag, Zap, ZapOff, Trash2, ChevronRight,
+  ChevronDown, AlertCircle, AlertTriangle, Clock, Hourglass, Search, Power,
+  Palette, Coffee, Briefcase, Camera, Shapes, Target, Brush, BookOpen, Users,
+  Crown, Network, Gift, ShieldCheck, ShieldOff, PlugZap, Unplug, CalendarDays,
 } from "lucide-react";
 import { parseKeywordInput, type ParseResult } from "@/lib/sites/csv-parser";
+import { ConnectModal } from "../../connect-modal";
+import { Kpi, StatCard, StatusDot, Toggle, Drawer, Spinner, EmptyState, type Tone } from "../../_components/ui";
+import { cn, relativeTime, formatDate, formatDateTime, daysSince } from "@/lib/format";
+import { BRAND } from "@/lib/version";
 
 const LANGUAGES = ["francais", "anglais", "allemand", "italien", "espagnol", "neerlandais"];
 
@@ -50,18 +32,44 @@ type Job = {
 
 type TabId = "blog" | "archive" | "image" | "scro" | "roadmap" | "profil" | "products" | "categories" | "optimizations";
 
-// Ordre EXACT du master prompt V3.
+// Ordre EXACT du master prompt V3.1.
 const TABS: { id: TabId; label: string; icon: JSX.Element }[] = [
-  { id: "blog", label: "Blog", icon: <FileText size={14} /> },
-  { id: "archive", label: "Archive", icon: <Archive size={14} /> },
-  { id: "image", label: "Image Lab", icon: <ImageIcon size={14} /> },
-  { id: "scro", label: "SCRO", icon: <ShoppingBag size={14} /> },
-  { id: "roadmap", label: "Roadmap", icon: <Map size={14} /> },
-  { id: "profil", label: "Profil", icon: <UserCircle size={14} /> },
-  { id: "products", label: "Produits", icon: <Package size={14} /> },
-  { id: "categories", label: "Product Categories", icon: <Tag size={14} /> },
-  { id: "optimizations", label: "Optimisations", icon: <Sparkles size={14} /> },
+  { id: "blog", label: "Blog", icon: <FileText size={15} /> },
+  { id: "archive", label: "Archive", icon: <Archive size={15} /> },
+  { id: "image", label: "Image Lab", icon: <ImageIcon size={15} /> },
+  { id: "scro", label: "SCRO", icon: <ShoppingBag size={15} /> },
+  { id: "roadmap", label: "Roadmap", icon: <Map size={15} /> },
+  { id: "profil", label: "Profil", icon: <UserCircle size={15} /> },
+  { id: "products", label: "Products", icon: <Package size={15} /> },
+  { id: "categories", label: "Product Categories", icon: <Tag size={15} /> },
+  { id: "optimizations", label: "Optimisations", icon: <Sparkles size={15} /> },
 ];
+
+function platformMeta(platform?: string): { label: string; Icon: typeof ShoppingBag } {
+  if (platform === "wordpress") return { label: "WordPress", Icon: Globe };
+  if (platform === "github_mdx") return { label: "GitHub MDX", Icon: FileText };
+  return { label: "Shopify", Icon: ShoppingBag };
+}
+
+function ConnChip({ status }: { status?: string }) {
+  if (status === "connected")
+    return (
+      <span className="inline-flex items-center gap-1.5 rounded-full bg-emerald-500/[0.12] px-2.5 py-0.5 text-xs font-medium text-emerald-300 ring-1 ring-inset ring-emerald-500/30">
+        <CheckCircle2 size={12} /> Connecté
+      </span>
+    );
+  if (status === "error")
+    return (
+      <span className="inline-flex items-center gap-1.5 rounded-full bg-red-500/10 px-2.5 py-0.5 text-xs font-medium text-red-300 ring-1 ring-inset ring-red-500/30">
+        <AlertCircle size={12} /> Erreur
+      </span>
+    );
+  return (
+    <span className="inline-flex items-center gap-1.5 rounded-full bg-amber-500/10 px-2.5 py-0.5 text-xs font-medium text-amber-300 ring-1 ring-inset ring-amber-500/30">
+      <AlertTriangle size={12} /> Déconnecté
+    </span>
+  );
+}
 
 function Status({ status }: { status: string }) {
   const map: Record<string, string> = {
@@ -78,13 +86,10 @@ function Status({ status }: { status: string }) {
   return <span className={`text-xs ${map[status] || "text-zinc-400"}`}>{status}</span>;
 }
 
-const inputCls =
-  "w-full rounded-lg border border-zinc-800 bg-zinc-900 px-3 py-2 text-sm text-zinc-100 outline-none focus:border-emerald-500";
-const cardCls = "rounded-lg border border-zinc-800 bg-zinc-900/40 p-4";
-const primaryBtn =
-  "flex items-center gap-2 rounded-lg bg-emerald-600 px-3 py-2 text-sm font-medium hover:bg-emerald-500 disabled:opacity-40";
-const ghostBtn =
-  "flex items-center gap-1.5 rounded-lg border border-zinc-700 px-2.5 py-1.5 text-xs hover:border-emerald-500 disabled:opacity-40";
+const inputCls = "input-base";
+const cardCls = "card-base";
+const primaryBtn = "btn-primary";
+const ghostBtn = "btn-ghost btn-sm";
 
 export default function SiteDetail({ params }: { params: { siteId: string } }) {
   const siteId = params.siteId;
@@ -121,73 +126,157 @@ export default function SiteDetail({ params }: { params: { siteId: string } }) {
     [headers]
   );
 
+  const [bump, setBump] = useState(0);
+  const [busy, setBusy] = useState<string | null>(null);
+  const [showConnect, setShowConnect] = useState(false);
+
+  const refreshAll = useCallback(() => { loadSite(); setBump((b) => b + 1); }, [loadSite]);
+
+  async function scout() {
+    if (!site) return;
+    const niche = String(site.voice_profile?.niche || site.voice_profile?.audience || site.name || "").slice(0, 120);
+    if (!confirm("Scout 100 mots-cles de niche puis les empiler en roadmap ? (~$0.30, ~60s)")) return;
+    setBusy("scout"); setMsg("Scout de 100 mots-cles en cours (~60s)...");
+    const { ok, json } = await api(`/api/admin/sites/keyword-scout`, {
+      method: "POST",
+      body: JSON.stringify({ site_id: siteId, niche, count: 100, enqueue: true }),
+    });
+    setBusy(null);
+    setMsg(ok ? `${json.enqueued ?? json.keywords?.length ?? 0} mots-cles empiles dans la roadmap.` : "Erreur scout, verifie le profil / la connexion.");
+    if (ok) refreshAll();
+  }
+  async function resume() {
+    setBusy("resume");
+    const { ok, json } = await api(`/api/admin/sites/resume`, { method: "POST", body: JSON.stringify({ site_id: siteId }) });
+    setBusy(null); setMsg(ok ? "Site relance." : `Erreur: ${json.error}`); if (ok) refreshAll();
+  }
+  async function disconnect() {
+    if (!confirm("Deconnecter ce site ? Les credentials chiffres seront supprimes.")) return;
+    setBusy("disc");
+    const { ok, json } = await api(`/api/admin/sites/disconnect`, { method: "POST", body: JSON.stringify({ site_id: siteId }) });
+    setBusy(null); setMsg(ok ? "Site deconnecte." : `Erreur: ${json.error}`); if (ok) refreshAll();
+  }
+
+  const connected = site?.connection_status === "connected";
+  const pm = platformMeta(site?.platform);
+  const hasProfile = site?.voice_profile && Object.keys(site.voice_profile).length > 0;
+
+  if (!password) {
+    return (
+      <main className="flex min-h-screen items-center justify-center px-4">
+        <div className="card-base max-w-sm text-center">
+          <p className="text-sm text-zinc-400">Session expiree. Reconnecte-toi pour acceder a ce site.</p>
+          <Link href="/admin" className="btn-primary mt-3 inline-flex">Aller au login</Link>
+        </div>
+      </main>
+    );
+  }
+
   return (
-    <main className="min-h-screen bg-zinc-950 px-6 py-8 text-zinc-100">
-      <div className="mx-auto max-w-4xl">
-        <Link href="/admin" className="mb-4 flex items-center gap-1.5 text-sm text-zinc-400 hover:text-zinc-100">
-          <ArrowLeft size={16} /> Retour
-        </Link>
-
-        {site && (
-          <>
-            <div className="mb-3 flex items-center gap-3">
-              <h1 className="text-xl font-semibold">{site.name}</h1>
-              {site.voice_profile?.content_language ? (
-                <span className="flex items-center gap-1.5 rounded-full border border-emerald-700 bg-emerald-950/40 px-2.5 py-0.5 text-xs capitalize text-emerald-300">
-                  <Globe size={12} /> {site.voice_profile.content_language}
-                </span>
-              ) : (
-                <span className="flex items-center gap-1.5 rounded-full border border-amber-700 bg-amber-950/40 px-2.5 py-0.5 text-xs text-amber-300">
-                  <Globe size={12} /> Langue non definie, va dans Profil
-                </span>
-              )}
-            </div>
-            <div className="mb-5 flex flex-wrap items-center gap-3 rounded-lg border border-zinc-800 bg-zinc-900/40 px-4 py-2.5 text-sm">
-              {site.connection_status === "connected" ? (
-                <span className="flex items-center gap-1.5 text-emerald-400"><CheckCircle2 size={14} /> Connecte</span>
-              ) : (
-                <span className="flex items-center gap-1.5 text-red-400"><Globe size={14} /> {site.connection_status}{site.connection_error ? `: ${site.connection_error}` : ""}</span>
-              )}
-              <span className="text-zinc-500">·</span>
-              <span className="text-zinc-400">{site.platform}</span>
-              <a href={site.url} target="_blank" rel="noreferrer" className="flex items-center gap-1 text-zinc-400 hover:text-emerald-400">{site.url} <ExternalLink size={12} /></a>
-              <a href={`/portail/${site.client_view_token}`} target="_blank" rel="noreferrer" className="ml-auto text-xs text-emerald-400">Portail client</a>
-            </div>
-          </>
-        )}
-
-        <div className="sticky top-0 z-10 mb-6 flex flex-wrap gap-1 border-b border-zinc-800 bg-zinc-950/95 backdrop-blur">
-          {TABS.map((t) => (
-            <button
-              key={t.id}
-              onClick={() => { setTab(t.id); setMsg(null); }}
-              className={`flex items-center gap-1.5 px-3 py-2 text-sm ${
-                tab === t.id ? "border-b-2 border-emerald-400 text-zinc-100" : "text-zinc-400"
-              }`}
-            >
-              {t.icon} {t.label}
-              {t.id === "roadmap" && site && (
-                <span className="rounded border border-zinc-700 px-1 text-[10px] text-zinc-400">{site.daily_post_quota ?? 0}/j</span>
-              )}
-              {t.id === "profil" && site?.voice_profile && Object.keys(site.voice_profile).length > 0 && (
-                <Check size={11} className="text-emerald-400" />
-              )}
-            </button>
-          ))}
+    <main className="min-h-screen px-6 py-6">
+      <div className="mx-auto w-full max-w-[1500px]">
+        {/* Header */}
+        <div className="flex flex-wrap items-start justify-between gap-4">
+          <div className="min-w-0">
+            <h1 className="truncate text-2xl font-semibold tracking-tight text-zinc-50">{site?.name || "..."}</h1>
+            {site && (
+              <div className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-1 text-sm text-zinc-500">
+                <span className="inline-flex items-center gap-1.5"><pm.Icon size={14} /> {pm.label}</span>
+                <span className="text-zinc-700">·</span>
+                <a href={site.url} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1 hover:text-zinc-300">
+                  {String(site.url || "").replace(/^https?:\/\//, "")} <ExternalLink size={12} />
+                </a>
+                <span className="text-zinc-700">·</span>
+                <ConnChip status={site.connection_status} />
+              </div>
+            )}
+          </div>
+          <div className="flex flex-wrap items-center gap-2">
+            <Link href="/admin" className="btn-ghost"><ArrowLeft size={15} /> {BRAND}</Link>
+            {connected && (
+              <button onClick={scout} disabled={busy === "scout"} className="btn-ghost">
+                {busy === "scout" ? <Loader2 size={15} className="animate-spin" /> : <Sparkles size={15} />} Scout 100 keywords
+              </button>
+            )}
+            {site?.paused_at && (
+              <button onClick={resume} disabled={busy === "resume"} className="btn-emerald">
+                {busy === "resume" ? <Loader2 size={15} className="animate-spin" /> : <Play size={15} />} Reprendre
+              </button>
+            )}
+            {connected ? (
+              <button onClick={disconnect} disabled={busy === "disc"} className="btn-danger">
+                {busy === "disc" ? <Loader2 size={15} className="animate-spin" /> : <Unplug size={15} />} Déconnecter
+              </button>
+            ) : (
+              <button onClick={() => setShowConnect(true)} className="btn-primary"><PlugZap size={15} /> Connecter</button>
+            )}
+            <button onClick={refreshAll} className="btn-icon" aria-label="Rafraichir"><RefreshCw size={15} /></button>
+          </div>
         </div>
 
-        {msg && <p className="mb-4 rounded-lg border border-zinc-800 bg-zinc-900/40 p-3 text-sm text-zinc-300">{msg}</p>}
+        {/* Not connected banner */}
+        {site && !connected && (
+          <div className="mt-4 flex flex-wrap items-center justify-between gap-3 rounded-xl border border-amber-500/30 bg-amber-500/[0.05] px-4 py-3 text-sm text-amber-200">
+            <span className="inline-flex items-center gap-2"><AlertTriangle size={16} /> Site pas encore connecté. Connecte la plateforme pour la lecture live et les pushes.</span>
+            <button onClick={() => setShowConnect(true)} className="btn-primary btn-sm">Connecter maintenant</button>
+          </div>
+        )}
 
-        {password && tab === "blog" && <BlogTab siteId={siteId} site={site} api={api} setMsg={setMsg} />}
-        {password && tab === "archive" && <ArchiveTab siteId={siteId} api={api} setMsg={setMsg} />}
-        {password && tab === "products" && <ProductsTab siteId={siteId} api={api} setMsg={setMsg} />}
-        {password && tab === "categories" && <CategoriesTab siteId={siteId} api={api} setMsg={setMsg} />}
-        {password && tab === "scro" && <ScroTab siteId={siteId} api={api} setMsg={setMsg} />}
-        {password && tab === "roadmap" && <RoadmapTab siteId={siteId} site={site} api={api} setMsg={setMsg} onSiteChanged={loadSite} />}
-        {password && tab === "profil" && <ProfilTab siteId={siteId} api={api} setMsg={setMsg} onSaved={loadSite} />}
-        {password && tab === "image" && <ImageTab siteId={siteId} site={site} api={api} setMsg={setMsg} />}
-        {password && tab === "optimizations" && <HistoryTab siteId={siteId} site={site} api={api} setMsg={setMsg} />}
+        {/* Tabs */}
+        <div className="mt-6 flex gap-0.5 overflow-x-auto border-b border-white/10">
+          {TABS.map((t) => {
+            const active = tab === t.id;
+            return (
+              <button
+                key={t.id}
+                onClick={() => { setTab(t.id); setMsg(null); }}
+                className={cn(
+                  "-mb-px inline-flex shrink-0 items-center gap-2 border-b-2 px-4 py-3 text-sm font-medium transition",
+                  active ? "border-white text-white" : "border-transparent text-zinc-500 hover:text-zinc-200",
+                )}
+              >
+                {t.icon} {t.label}
+                {t.id === "roadmap" && site && (site.daily_post_quota ?? 0) > 0 && (
+                  <span className="rounded-md bg-white/10 px-1.5 py-0.5 text-[10px] font-semibold text-zinc-300">{site.daily_post_quota}/J</span>
+                )}
+                {t.id === "profil" && hasProfile && <Check size={13} className="text-emerald-400" />}
+              </button>
+            );
+          })}
+        </div>
+
+        {/* Toast */}
+        {msg && (
+          <div className="mt-4 flex items-start justify-between gap-3 rounded-xl border border-white/10 bg-white/[0.03] px-4 py-3 text-sm text-zinc-300">
+            <span>{msg}</span>
+            <button onClick={() => setMsg(null)} className="text-zinc-600 hover:text-zinc-300"><X size={15} /></button>
+          </div>
+        )}
+
+        {/* Body */}
+        <div className="mt-6 pb-24">
+          {tab === "blog" && <BlogTab key={`blog-${bump}`} siteId={siteId} site={site} api={api} setMsg={setMsg} />}
+          {tab === "archive" && <ArchiveTab key={`archive-${bump}`} siteId={siteId} api={api} setMsg={setMsg} />}
+          {tab === "image" && <ImageTab key={`image-${bump}`} siteId={siteId} site={site} api={api} setMsg={setMsg} />}
+          {tab === "scro" && <ScroTab key={`scro-${bump}`} siteId={siteId} api={api} setMsg={setMsg} />}
+          {tab === "roadmap" && <RoadmapTab key={`roadmap-${bump}`} siteId={siteId} site={site} api={api} setMsg={setMsg} onSiteChanged={refreshAll} />}
+          {tab === "profil" && <ProfilTab key={`profil-${bump}`} siteId={siteId} api={api} setMsg={setMsg} onSaved={refreshAll} />}
+          {tab === "products" && <ProductsTab key={`products-${bump}`} siteId={siteId} api={api} setMsg={setMsg} />}
+          {tab === "categories" && <CategoriesTab key={`categories-${bump}`} siteId={siteId} api={api} setMsg={setMsg} />}
+          {tab === "optimizations" && <HistoryTab key={`opt-${bump}`} siteId={siteId} site={site} api={api} setMsg={setMsg} />}
+        </div>
       </div>
+
+      {showConnect && site && (
+        <ConnectModal
+          siteId={siteId}
+          siteName={site.name}
+          platform={site.platform}
+          password={password}
+          onClose={() => setShowConnect(false)}
+          onConnected={() => { setShowConnect(false); refreshAll(); }}
+        />
+      )}
     </main>
   );
 }
@@ -279,32 +368,73 @@ function RefreshCwTab() {
   return <Wand2 size={12} />;
 }
 
+const ROADMAP_TIMES = [8, 12, 18];
+function priorityLabel(p?: number | null): string {
+  if (p == null) return "undefined";
+  if (p >= 10) return "haute";
+  if (p >= 5) return "moyenne";
+  return "basse";
+}
+function SlotStatus({ status }: { status: string }) {
+  const map: Record<string, { label: string; cls: string }> = {
+    pending: { label: "Planifie", cls: "text-zinc-500" },
+    in_progress: { label: "En cours", cls: "text-amber-300" },
+    done: { label: "Publie", cls: "text-emerald-300" },
+    error: { label: "Erreur", cls: "text-red-300" },
+  };
+  const m = map[status] || { label: status, cls: "text-zinc-500" };
+  return (
+    <span className={cn("inline-flex items-center gap-1 text-[11px]", m.cls)}>
+      {status === "in_progress" ? <Loader2 size={11} className="animate-spin" /> : status === "error" ? <AlertCircle size={11} /> : status === "done" ? <CheckCircle2 size={11} /> : <Clock size={11} />}
+      {m.label}
+    </span>
+  );
+}
+
 function RoadmapTab({ siteId, site, api, setMsg, onSiteChanged }: { siteId: string; site: any; api: ApiFn; setMsg: (s: string | null) => void; onSiteChanged: () => void }) {
-  const [jobs, setJobs] = useState<Job[]>([]);
+  const [jobs, setJobs] = useState<any[]>([]);
+  const [counts, setCounts] = useState<Record<string, number>>({ pending: 0, in_progress: 0, done: 0, error: 0 });
   const [keyword, setKeyword] = useState("");
   const [brief, setBrief] = useState("");
   const [raw, setRaw] = useState("");
   const [busy, setBusy] = useState<string | null>(null);
   const [parsed, setParsed] = useState<ParseResult | null>(null);
+  const [filter, setFilter] = useState<"upcoming" | "published" | "errors">("upcoming");
+  const [daysShown, setDaysShown] = useState(7);
 
   const load = useCallback(async () => {
     const { ok, json } = await api(`/api/admin/sites/${siteId}/jobs`);
-    if (ok) setJobs(json.jobs || []);
+    if (ok) { setJobs(json.jobs || []); if (json.counts) setCounts(json.counts); }
   }, [siteId, api]);
   useEffect(() => { load(); }, [load]);
 
+  const hasRunning = jobs.some((j) => j.status === "in_progress");
+  useEffect(() => {
+    if (!hasRunning) return;
+    const id = setInterval(load, 3000);
+    return () => clearInterval(id);
+  }, [hasRunning, load]);
+
   const quota = site?.daily_post_quota ?? 0;
   const autoOn = !!site?.auto_publish_enabled;
-  const pending = jobs.filter((j) => j.status === "pending").length;
-  const inProgress = jobs.filter((j) => j.status === "in_progress").length;
-  const doneCount = jobs.filter((j) => j.status === "done").length;
+  const connected = site?.connection_status === "connected";
+  const pending = counts.pending ?? 0;
+  const inProgress = counts.in_progress ?? 0;
+  const doneCount = counts.done ?? 0;
+  const errorCount = counts.error ?? 0;
   const queueSize = pending + inProgress;
-  const blockedReason = site?.connection_status !== "connected" ? "Site non connecte" : quota === 0 ? "Quota daily a 0" : null;
+  const blockedReason = !connected ? "Site non connecte" : quota === 0 ? "Quota daily a 0" : null;
 
   async function toggleAuto() {
     setBusy("auto");
     const { ok, json } = await api(`/api/admin/sites/update`, { method: "POST", body: JSON.stringify({ site_id: siteId, auto_publish_enabled: !autoOn }) });
-    setBusy(null); setMsg(ok ? (autoOn ? "Auto-publish desactive." : "Auto-publish active.") : `Erreur: ${json.error}`);
+    setBusy(null); setMsg(ok ? (autoOn ? "Flow desactive." : "Flow active.") : `Erreur: ${json.error}`);
+    if (ok) onSiteChanged();
+  }
+  async function setQuota(n: number) {
+    setBusy(`q${n}`);
+    const { ok, json } = await api(`/api/admin/sites/update`, { method: "POST", body: JSON.stringify({ site_id: siteId, daily_post_quota: n }) });
+    setBusy(null); setMsg(ok ? `Cadence reglee a ${n}/jour.` : `Erreur: ${json.error}`);
     if (ok) onSiteChanged();
   }
   async function addSingle() {
@@ -315,6 +445,14 @@ function RoadmapTab({ siteId, site, api, setMsg, onSiteChanged }: { siteId: stri
     if (ok) { setKeyword(""); setBrief(""); load(); }
   }
   function onRaw(v: string) { setRaw(v); setParsed(v.trim() ? parseKeywordInput(v) : null); }
+  function onFile(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    if (file.size > 2_000_000) { setMsg("Fichier trop gros (max 2 Mo)."); return; }
+    const reader = new FileReader();
+    reader.onload = () => onRaw(String(reader.result || ""));
+    reader.readAsText(file);
+  }
   async function importBulk() {
     if (!parsed?.keywords.length) return;
     setBusy("bulk");
@@ -324,96 +462,250 @@ function RoadmapTab({ siteId, site, api, setMsg, onSiteChanged }: { siteId: stri
     if (ok) { setRaw(""); setParsed(null); load(); }
   }
   async function runNow(id: string) {
-    setBusy(id); setMsg("Generation en cours (1 a 2 min)...");
+    setBusy(id); setMsg("Generation lancee (1 a 2 min)...");
     const { ok, json } = await api(`/api/admin/jobs/run`, { method: "POST", body: JSON.stringify({ job_id: id }) });
-    setBusy(null); setMsg(ok ? "Article publie." : `Echec: ${json.error}`); load();
+    setBusy(null); setMsg(ok ? "Job lance, suivi en direct." : `Echec: ${json.error}`); load();
+  }
+  async function delJob(id: string) {
+    setBusy(`del${id}`);
+    const { ok, json } = await api(`/api/admin/sites/${siteId}/jobs?id=${id}`, { method: "DELETE" });
+    setBusy(null); if (!ok) setMsg(`Erreur: ${json.error}`); load();
   }
 
-  const KPI = ({ label, value, hint }: { label: string; value: string; hint?: string }) => (
-    <div className={cardCls}><div className="text-[11px] uppercase tracking-wider text-zinc-500">{label}</div><div className="mt-1 text-2xl font-semibold text-zinc-100">{value}</div>{hint && <div className="text-xs text-zinc-500">{hint}</div>}</div>
-  );
+  // Projection calendrier : pending + in_progress, ordonnes priorite desc / FIFO (deja trie cote serveur).
+  const upcoming = jobs.filter((j) => j.kind === "generate_article" && (j.status === "pending" || j.status === "in_progress"));
+  const published = jobs.filter((j) => j.status === "done").sort((a, b) => String(b.completed_at).localeCompare(String(a.completed_at)));
+  const errored = jobs.filter((j) => j.status === "error");
+
+  const effQuota = Math.max(1, quota);
+  const totalDays = Math.max(1, Math.ceil(upcoming.length / effQuota));
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+
+  function Slot({ time, job }: { time: number; job: any | null }) {
+    if (!job) {
+      return (
+        <div className="px-4 py-3.5">
+          <div className="eyebrow text-zinc-700">{time}H</div>
+          <p className="mt-2 text-xs text-zinc-700">En attente</p>
+        </div>
+      );
+    }
+    return (
+      <div className="px-4 py-3.5">
+        <div className="flex items-center justify-between">
+          <span className="eyebrow text-zinc-500">{time}H</span>
+          <SlotStatus status={job.status} />
+        </div>
+        <p className="mt-1.5 line-clamp-2 text-sm text-zinc-200">{job.keyword || job.target_title || "(sans titre)"}</p>
+        <p className="mt-0.5 text-[11px] text-zinc-600">Priorite {priorityLabel(job.priority)}</p>
+        {job.error && <p className="mt-1 line-clamp-2 text-[11px] text-red-400">{String(job.error).slice(0, 120)}</p>}
+        <div className="mt-2.5 flex items-center gap-1.5">
+          <button onClick={() => runNow(job.id)} disabled={busy === job.id} className="btn-primary btn-sm flex-1">
+            {busy === job.id ? <Loader2 size={12} className="animate-spin" /> : <Play size={12} />} Lancer
+          </button>
+          <button onClick={() => delJob(job.id)} disabled={busy === `del${job.id}`} className="btn-icon h-8 w-8 shrink-0" aria-label="Supprimer">
+            <Trash2 size={13} />
+          </button>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="space-y-5">
-      <div className={`${cardCls} flex items-center justify-between`}>
+      {/* Auto-publish banner */}
+      <div className={cn("flex flex-col gap-4 rounded-xl border bg-white/[0.02] p-4 md:flex-row md:items-center md:justify-between", autoOn ? "border-emerald-500/30" : "border-white/[0.07]")}>
         <div className="flex items-center gap-3">
-          {autoOn ? <Zap size={22} className="text-emerald-400" /> : <ZapOff size={22} className="text-zinc-500" />}
+          <span className={cn("flex h-10 w-10 items-center justify-center rounded-full", autoOn ? "bg-emerald-500/15 text-emerald-300" : "bg-white/[0.04] text-zinc-500")}>
+            {autoOn ? <Zap size={20} /> : <ZapOff size={20} />}
+          </span>
           <div>
-            <p className="font-medium">{autoOn ? "Mode auto-publish ACTIF" : "Mode auto-publish INACTIF"}</p>
-            <p className="text-xs text-zinc-500">
-              {autoOn ? `Le cron tourne et publie jusqu'a ${quota} article(s)/jour automatiquement.`
-                : blockedReason ? `Impossible d'activer : ${blockedReason}.`
-                : "Active pour que la roadmap se genere et se publie toute seule."}
+            <p className="font-medium text-zinc-100">{autoOn ? "Mode auto-publish ACTIF" : "Mode auto-publish INACTIF"}</p>
+            <p className="mt-0.5 max-w-xl text-xs text-zinc-500">
+              {autoOn
+                ? `Le cron tourne a 8h / 12h / 18h Paris et publie jusqu'a ${quota} article(s) par jour automatiquement.`
+                : blockedReason
+                  ? `Impossible d'activer : ${blockedReason}.`
+                  : "Active pour que les articles de la roadmap soient generes et publies tout seuls (3 par jour max selon ton quota)."}
             </p>
           </div>
         </div>
-        <button onClick={toggleAuto} disabled={busy === "auto" || (!autoOn && !!blockedReason)}
-          className={autoOn ? "rounded-lg border border-red-700 bg-red-950/30 px-3 py-2 text-sm text-red-300 disabled:opacity-40" : primaryBtn}>
-          {busy === "auto" ? <Loader2 size={16} className="inline animate-spin" /> : null} {autoOn ? "Desactiver le flow" : "Activer le flow"}
-        </button>
+        <div className="flex items-center gap-4">
+          <div className="flex items-center gap-1.5">
+            <span className="text-xs text-zinc-500">Articles/jour</span>
+            {[0, 1, 2, 3].map((n) => (
+              <button key={n} onClick={() => setQuota(n)} disabled={busy === `q${n}`}
+                className={cn("h-7 w-7 rounded-md text-xs font-semibold transition", quota === n ? "bg-white text-black" : "border border-white/10 text-zinc-400 hover:border-white/25")}>
+                {n}
+              </button>
+            ))}
+          </div>
+          <button onClick={toggleAuto} disabled={busy === "auto" || (!autoOn && !!blockedReason)} className={autoOn ? "btn-danger" : "btn-emerald"}>
+            {busy === "auto" ? <Loader2 size={15} className="animate-spin" /> : autoOn ? <ZapOff size={15} /> : <Zap size={15} />}
+            {autoOn ? "Desactiver le flow" : "Activer le flow"}
+          </button>
+        </div>
       </div>
 
       {quota === 0 && (
-        <p className="rounded-lg border border-amber-900 bg-amber-950/40 p-3 text-sm text-amber-300">
-          Quota a zero : tu peux empiler des mots-cles mais rien ne se generera tant que le quota est a 0. Regle-le dans l'onglet Profil (Articles/jour).
+        <p className="rounded-xl border border-amber-500/30 bg-amber-500/[0.05] p-3 text-sm text-amber-200">
+          Quota a zero : tu peux empiler des mots-cles mais le worker ne les generera pas tant que la cadence est a 0. Regle-la ci-dessus.
         </p>
       )}
 
+      {/* KPIs */}
       <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
-        <KPI label="Mots-cles en file" value={String(queueSize)} hint={`${pending} pending · ${inProgress} en cours`} />
-        <KPI label="Cadence prevue" value={`${quota} / jour`} hint={`${quota * 30}/mois max`} />
-        <KPI label="Temps pour vider" value={quota > 0 ? `~${Math.ceil(queueSize / quota)} j` : "-"} />
-        <KPI label="Articles generes" value={String(doneCount)} hint="depuis cette roadmap" />
+        <Kpi label="Mots-cles en file" value={queueSize} hint={`${pending} pending, ${inProgress} en cours`} tone={queueSize > 0 ? "accent" : "default"} />
+        <Kpi label="Cadence prevue" value={`${quota} / jour`} hint={`${quota * 30}/mois max`} tone={quota === 0 ? "warn" : "default"} />
+        <Kpi label="Temps pour vider" value={quota > 0 ? `~${Math.ceil(queueSize / quota)} j` : "-"} hint={quota > 0 ? "au rythme actuel" : "cadence a 0"} />
+        <Kpi label="Articles generes" value={doneCount} hint="depuis cette roadmap" />
       </div>
 
+      {/* Forms */}
       <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
-        <div className={cardCls}>
-          <h3 className="mb-2 flex items-center gap-2 font-medium"><Sparkles size={16} /> Ajout simple</h3>
-          <input value={keyword} onChange={(e) => setKeyword(e.target.value)} className={`${inputCls} mb-2`} placeholder="ex: the matcha bienfaits" />
-          <textarea value={brief} onChange={(e) => setBrief(e.target.value)} rows={3} className={`${inputCls} mb-3`} placeholder="Brief (optionnel) : angle, intent, audience cible..." />
-          <button onClick={addSingle} disabled={busy === "single" || keyword.trim().length < 2} className={primaryBtn}>
-            {busy === "single" ? <Loader2 size={16} className="animate-spin" /> : <Plus size={16} />} Ajouter a la roadmap
+        <div className="card-base">
+          <h3 className="mb-1 flex items-center gap-2 text-sm font-semibold text-zinc-100"><Sparkles size={16} className="text-emerald-300" /> Ajout simple</h3>
+          <p className="mb-3 text-xs text-zinc-500">Un mot-cle + brief optionnel (angle, intent, audience visee).</p>
+          <input value={keyword} onChange={(e) => setKeyword(e.target.value)} maxLength={200} className="input-base mb-2" placeholder="ex: the matcha bienfaits" />
+          <textarea value={brief} onChange={(e) => setBrief(e.target.value)} rows={3} maxLength={2000} className="input-base mb-3" placeholder="Brief (optionnel) : angle, intent, audience cible..." />
+          <button onClick={addSingle} disabled={busy === "single" || keyword.trim().length < 2} className="btn-primary">
+            {busy === "single" ? <Loader2 size={15} className="animate-spin" /> : <Plus size={15} />} Ajouter a la roadmap
           </button>
         </div>
 
-        <div className={cardCls}>
-          <h3 className="mb-2 flex items-center gap-2 font-medium"><ListPlus size={16} /> Import en masse</h3>
-          <textarea value={raw} onChange={(e) => onRaw(e.target.value)} rows={6} className={`${inputCls} mb-2 font-mono text-xs`} placeholder={"1 mot-cle par ligne\nOU CSV: Priorite,Categorie,Titre,Keyword,Slug"} />
+        <div className="card-base">
+          <div className="mb-1 flex items-center justify-between">
+            <h3 className="flex items-center gap-2 text-sm font-semibold text-zinc-100"><ListPlus size={16} className="text-emerald-300" /> Import en masse</h3>
+            <label className="btn-ghost btn-sm cursor-pointer">
+              <UploadCloud size={13} /> Fichier CSV
+              <input type="file" accept=".csv,text/csv,text/plain" className="hidden" onChange={onFile} />
+            </label>
+          </div>
+          <p className="mb-3 text-xs text-zinc-500">Colle une liste (1 mot-cle par ligne) OU un CSV (Priorite, Categorie, Titre, Keyword, Slug), detection auto.</p>
+          <textarea value={raw} onChange={(e) => onRaw(e.target.value)} rows={6} className="input-base mb-2 font-mono text-xs" placeholder={"1 mot-cle par ligne\nOU CSV: Priorite,Categorie,Titre,Keyword,Slug"} />
           {parsed && (
             <p className="mb-2 text-xs text-zinc-400">
               {parsed.keywords.length} mots-cles ({parsed.format})
               {parsed.warnings.length > 0 && <span className="text-amber-400"> · {parsed.warnings.length} avertissement(s)</span>}
             </p>
           )}
-          <button onClick={importBulk} disabled={busy === "bulk" || !parsed?.keywords.length} className={primaryBtn}>
-            {busy === "bulk" ? <Loader2 size={16} className="animate-spin" /> : <ListPlus size={16} />} Importer {parsed?.keywords.length ? `(${parsed.keywords.length})` : ""}
+          <button onClick={importBulk} disabled={busy === "bulk" || !parsed?.keywords.length} className="btn-primary">
+            {busy === "bulk" ? <Loader2 size={15} className="animate-spin" /> : <ListPlus size={15} />} Importer {parsed?.keywords.length ? `(${parsed.keywords.length})` : ""}
           </button>
         </div>
       </div>
 
+      {/* Calendrier editorial */}
       <div>
-        <h3 className="mb-3 font-medium">File ({jobs.length})</h3>
-        <div className="space-y-2">
-          {jobs.length === 0 && <p className="text-sm text-zinc-500">Aucun mot-cle en file.</p>}
-          {jobs.map((job) => (
-            <div key={job.id} className="flex items-center justify-between rounded-lg border border-zinc-800 bg-zinc-900/40 p-3">
-              <div className="min-w-0">
-                <p className="truncate text-sm text-zinc-200">{job.keyword || job.kind}</p>
-                {job.error && <p className="truncate text-xs text-red-400">{job.error}</p>}
-                {job.output?.url && <a href={job.output.url} target="_blank" rel="noreferrer" className="text-xs text-emerald-400">Voir l'article</a>}
-              </div>
-              <div className="flex items-center gap-3">
-                <Status status={job.status} />
-                {(job.status === "pending" || job.status === "error") && (
-                  <button onClick={() => runNow(job.id)} disabled={busy === job.id} className={ghostBtn}>
-                    {busy === job.id ? <Loader2 size={12} className="animate-spin" /> : <Play size={12} />} Generer
-                  </button>
+        <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
+          <div>
+            <h3 className="text-sm font-semibold text-zinc-100">Calendrier editorial</h3>
+            <p className="text-xs text-zinc-500">slots 8h / 12h / 18h (Paris), ordre par priorite decroissante</p>
+          </div>
+          <div className="flex items-center gap-1.5">
+            <button onClick={() => setFilter("upcoming")} className={cn("pill", filter === "upcoming" && "pill-active")}>A venir <span className="opacity-70">{queueSize}</span></button>
+            <button onClick={() => setFilter("published")} className={cn("pill", filter === "published" && "pill-active")}>Publies <span className="opacity-70">{doneCount}</span></button>
+            <button onClick={() => setFilter("errors")} className={cn("pill", filter === "errors" && "pill-active")}>Erreurs <span className="opacity-70">{errorCount}</span></button>
+          </div>
+        </div>
+
+        {filter === "upcoming" && (
+          <>
+            {errorCount > 0 && (
+              <button onClick={() => setFilter("errors")} className="mb-3 flex w-full items-center gap-2 rounded-lg border border-red-500/30 bg-red-500/[0.05] px-3 py-2 text-left text-xs text-red-300">
+                <AlertTriangle size={14} /> {errorCount} job(s) en erreur. Voir l&apos;onglet Erreurs pour relancer.
+              </button>
+            )}
+            {upcoming.length === 0 ? (
+              <EmptyState>Aucun mot-cle en file. Ajoute des mots-cles ci-dessus.</EmptyState>
+            ) : (
+              <div className="space-y-3">
+                {Array.from({ length: Math.min(daysShown, totalDays) }).map((_, d) => {
+                  const date = new Date(today);
+                  date.setDate(today.getDate() + d);
+                  const filled = ROADMAP_TIMES.filter((_, p) => p < quota && upcoming[d * effQuota + p]).length;
+                  const isToday = d === 0;
+                  return (
+                    <div key={d} className={cn("overflow-hidden rounded-xl border", isToday ? "border-emerald-500/30" : "border-white/[0.07]")}>
+                      <div className="flex items-center justify-between border-b border-white/[0.06] bg-white/[0.02] px-4 py-2.5">
+                        <div className="flex items-center gap-2">
+                          <span className="text-sm font-medium text-zinc-100">{isToday ? "Aujourd'hui" : `Jour ${d + 1}`}</span>
+                          <span className="text-xs text-zinc-500">{formatDate(date.toISOString())}</span>
+                          {isToday && <span className="rounded bg-emerald-500/15 px-1.5 py-0.5 text-[10px] font-semibold text-emerald-300">LIVE</span>}
+                        </div>
+                        <span className="text-xs text-zinc-600">{filled} / {quota || 0} planifie(s)</span>
+                      </div>
+                      <div className="grid grid-cols-1 divide-y divide-white/[0.05] sm:grid-cols-3 sm:divide-x sm:divide-y-0">
+                        {ROADMAP_TIMES.map((t, p) => {
+                          const inQuota = p < quota;
+                          if (!inQuota) {
+                            return (
+                              <div key={t} className="px-4 py-3.5">
+                                <div className="eyebrow text-zinc-700">{t}H</div>
+                                <p className="mt-2 text-xs text-zinc-700">Hors quota</p>
+                              </div>
+                            );
+                          }
+                          return <Slot key={t} time={t} job={upcoming[d * effQuota + p] || null} />;
+                        })}
+                      </div>
+                    </div>
+                  );
+                })}
+                {totalDays > daysShown && (
+                  <div className="flex justify-center pt-2">
+                    <button onClick={() => setDaysShown((n) => n + 30)} className="btn-ghost">
+                      Voir 30 jours de plus ({Math.max(0, upcoming.length - daysShown * effQuota)} restants)
+                    </button>
+                  </div>
                 )}
               </div>
+            )}
+          </>
+        )}
+
+        {filter === "published" && (
+          published.length === 0 ? <EmptyState>Aucun article publie depuis cette roadmap.</EmptyState> : (
+            <div className="card-base divide-y divide-white/[0.06] p-0">
+              {published.slice(0, 100).map((j) => (
+                <div key={j.id} className="flex items-center justify-between gap-3 px-4 py-3">
+                  <div className="min-w-0">
+                    <p className="truncate text-sm text-zinc-200">{j.keyword || j.target_title}</p>
+                    <p className="text-xs text-zinc-500">{j.completed_at ? formatDateTime(j.completed_at) : "publie"}</p>
+                  </div>
+                  {j.output?.url && <a href={j.output.url} target="_blank" rel="noreferrer" className="btn-ghost btn-sm shrink-0"><ExternalLink size={12} /> Voir</a>}
+                </div>
+              ))}
             </div>
-          ))}
-        </div>
+          )
+        )}
+
+        {filter === "errors" && (
+          errored.length === 0 ? <EmptyState>Aucun job en erreur.</EmptyState> : (
+            <div className="space-y-2">
+              {errored.map((j) => (
+                <div key={j.id} className="flex items-start justify-between gap-3 rounded-xl border border-red-500/20 bg-red-500/[0.03] p-3">
+                  <div className="min-w-0">
+                    <p className="truncate text-sm text-zinc-200">{j.keyword || j.target_title}</p>
+                    <p className="mt-0.5 line-clamp-2 text-xs text-red-400">{j.error}</p>
+                  </div>
+                  <div className="flex shrink-0 items-center gap-1.5">
+                    <button onClick={() => runNow(j.id)} disabled={busy === j.id} className="btn-ghost btn-sm">
+                      {busy === j.id ? <Loader2 size={12} className="animate-spin" /> : <Play size={12} />} Relancer
+                    </button>
+                    <button onClick={() => delJob(j.id)} disabled={busy === `del${j.id}`} className="btn-icon h-8 w-8" aria-label="Supprimer"><Trash2 size={13} /></button>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )
+        )}
       </div>
+
+      <p className="rounded-xl border border-white/[0.06] bg-white/[0.01] p-3 text-xs leading-relaxed text-zinc-500">
+        Le worker cron draine cette file (generation d&apos;articles complets via Claude, publication automatique sur Shopify selon le quota journalier). Tu peux empiler les mots-cles ; ils attendent leur tour de generation, ou lance-les a la main.
+      </p>
     </div>
   );
 }
@@ -1081,130 +1373,208 @@ function ScroTab({ siteId, api, setMsg }: { siteId: string; api: ApiFn; setMsg: 
   );
 }
 
+const ANTI_AI_LABELS_FOR_UI: { key: string; label: string }[] = [
+  // Tirets longs affiches via fromCharCode : la regle projet interdit tout em-dash brut dans le source.
+  { key: "em_dash", label: "Em-dash et en-dash «" + String.fromCharCode(0x2014) + "» «" + String.fromCharCode(0x2013) + "»" },
+  { key: "dans_cet_article", label: '"Dans cet article nous allons voir"' },
+  { key: "noubliez_pas", label: "\"N'oubliez pas que...\"" },
+  { key: "ere_du_digital", label: "\"A l'ere du digital\", \"dans un monde ou\"" },
+  { key: "en_conclusion", label: '"En conclusion" comme titre' },
+  { key: "il_est_important", label: '"Il est important de noter"' },
+  { key: "monde_ou", label: "\"Dans un monde ou\", \"a une epoque ou\"" },
+  { key: "delve", label: 'Tics traduits ("plonger dans", "explorer", "naviguer")' },
+  { key: "important_de_noter", label: "\"Il convient de noter\", \"il faut souligner\"" },
+];
+
+function LabelHint({ label, hint }: { label: string; hint?: string }) {
+  return (
+    <div className="mb-1.5">
+      <div className="eyebrow">{label}</div>
+      {hint ? <p className="mt-1 text-xs leading-relaxed text-zinc-600">{hint}</p> : null}
+    </div>
+  );
+}
+
 function ProfilTab({ siteId, api, setMsg, onSaved }: { siteId: string; api: ApiFn; setMsg: (s: string | null) => void; onSaved: () => void }) {
   const [vp, setVp] = useState<Record<string, any>>({});
-  const [quota, setQuota] = useState(1);
-  const [autoPub, setAutoPub] = useState(true);
-  const [discoverUrl, setDiscoverUrl] = useState("");
+  const [loading, setLoading] = useState(true);
+  const [exists, setExists] = useState(false);
   const [busy, setBusy] = useState<string | null>(null);
 
   useEffect(() => {
     api(`/api/admin/sites/list`).then(({ ok, json }) => {
+      setLoading(false);
       if (!ok) return;
       const s = (json.sites || []).find((x: any) => x.id === siteId);
-      if (s) { setVp(s.voice_profile || {}); setQuota(s.daily_post_quota ?? 1); setAutoPub(!!s.auto_publish_enabled); if (!discoverUrl) setDiscoverUrl(s.url || ""); }
+      if (s) { setVp(s.voice_profile || {}); setExists(!!s.voice_profile && Object.keys(s.voice_profile).length > 0); }
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [siteId]);
 
   const f = (k: string) => vp[k] ?? "";
   const set = (k: string, v: string) => setVp((p) => ({ ...p, [k]: v }));
-
-  async function discover() {
-    if (!discoverUrl.trim()) return;
-    setBusy("disc"); setMsg("Analyse du site (scrape + IA)...");
-    const { ok, json } = await api(`/api/admin/onboarding/discover`, { method: "POST", body: JSON.stringify({ url: discoverUrl }) });
-    setBusy(null);
-    if (ok) { setVp((p) => ({ ...p, ...json.voice_profile })); setMsg("Profil propose, verifie puis enregistre."); }
-    else setMsg(`Erreur: ${json.error}`);
-  }
-  async function save() {
-    setBusy("save");
-    const r1 = await api(`/api/admin/sites/update-profile`, { method: "POST", body: JSON.stringify({ site_id: siteId, voice_profile: vp }) });
-    const r2 = await api(`/api/admin/sites/update`, { method: "POST", body: JSON.stringify({ site_id: siteId, daily_post_quota: Number(quota), auto_publish_enabled: autoPub }) });
-    setBusy(null);
-    setMsg(r1.ok && r2.ok ? "Profil enregistre." : "Erreur a l'enregistrement");
-    if (r1.ok && r2.ok) onSaved();
-  }
-
-  const fields: [string, string, boolean][] = [
-    ["mascot", "Mascotte / persona auteur", false],
-    ["tone_description", "Ton editorial", true],
-    ["audience", "Audience", true],
-    ["example_phrases", "Phrases exemple", true],
-    ["anti_ai_custom", "Regles persona custom", true],
-    ["bonus_instructions", "Instructions bonus", true],
-    ["product_tone_description", "Ton fiches produit", true],
-    ["image_style_hint", "Style des images", false],
-    ["author_name", "Nom auteur", false],
-    ["author_role", "Role auteur", false],
-    ["branding_accent_hex", "Couleur accent (#hex)", false],
-  ];
-  const ANTI_AI_PRESETS = ["in conclusion", "delve", "tapestry", "de nos jours", "incontournable", "il est important de noter"];
   const activePatterns: string[] = Array.isArray(vp.anti_ai_patterns) ? vp.anti_ai_patterns : [];
-  const togglePattern = (p: string) =>
+  const togglePattern = (key: string) =>
     setVp((prev) => {
       const cur: string[] = Array.isArray(prev.anti_ai_patterns) ? prev.anti_ai_patterns : [];
-      return { ...prev, anti_ai_patterns: cur.includes(p) ? cur.filter((x) => x !== p) : [...cur, p] };
+      return { ...prev, anti_ai_patterns: cur.includes(key) ? cur.filter((x) => x !== key) : [...cur, key] };
     });
+
+  async function save() {
+    setBusy("save");
+    const { ok, json } = await api(`/api/admin/sites/update-profile`, {
+      method: "POST",
+      body: JSON.stringify({ site_id: siteId, voice_profile: vp }),
+    });
+    setBusy(null); setMsg(ok ? "Profil enregistre." : `Erreur: ${json.error}`);
+    if (ok) { setExists(true); onSaved(); }
+  }
+  async function clearProfile() {
+    if (!confirm("Effacer completement le profil de voix de ce site ?")) return;
+    setBusy("clear");
+    const { ok, json } = await api(`/api/admin/sites/update-profile`, {
+      method: "POST",
+      body: JSON.stringify({ site_id: siteId, voice_profile: null }),
+    });
+    setBusy(null); setMsg(ok ? "Profil efface." : `Erreur: ${json.error}`);
+    if (ok) { setVp({}); setExists(false); onSaved(); }
+  }
+
+  if (loading) return <Spinner label="Chargement du profil..." />;
 
   return (
     <div className="space-y-5">
-      <div className={cardCls}>
-        <h3 className="mb-2 flex items-center gap-2 font-medium"><Sparkles size={16} /> Auto-decouverte</h3>
-        <div className="flex gap-2">
-          <input value={discoverUrl} onChange={(e) => setDiscoverUrl(e.target.value)} className={inputCls} placeholder="https://monsite.com" />
-          <button onClick={discover} disabled={busy === "disc"} className={primaryBtn}>
-            {busy === "disc" ? <Loader2 size={16} className="animate-spin" /> : <Sparkles size={16} />} Analyser
-          </button>
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div>
+          <h2 className="text-lg font-semibold text-zinc-100">Profil de voix</h2>
+          <p className="mt-1 max-w-3xl text-sm text-zinc-500">
+            Injecte dans tous les prompts Claude qui touchent au contenu de ce site : generation d&apos;articles ET optimisation produits. Plus c&apos;est precis, plus la voix correspond.
+          </p>
         </div>
+        {exists && (
+          <span className="inline-flex items-center gap-1.5 rounded-full bg-emerald-500/[0.12] px-2.5 py-1 text-xs font-medium text-emerald-300 ring-1 ring-inset ring-emerald-500/30">
+            <CheckCircle2 size={13} /> Profil actif
+          </span>
+        )}
       </div>
 
-      <div className={`${cardCls} space-y-3`}>
+      {/* 1. Identite */}
+      <section className="card-base space-y-4">
+        <h3 className="flex items-center gap-2 text-sm font-semibold text-zinc-100"><UserCircle size={16} className="text-emerald-300" /> Identite</h3>
         <div>
-          <label className="mb-1 block text-xs text-zinc-400">Langue du site (verrouillee apres choix)</label>
-          <select value={f("content_language") || ""} onChange={(e) => set("content_language", e.target.value)} className={inputCls}>
-            <option value="">Choisir une langue...</option>
-            {LANGUAGES.map((l) => (
-              <option key={l} value={l} className="capitalize">{l}</option>
-            ))}
-          </select>
+          <LabelHint label="Mascotte / personnage narrateur" hint="Ex: 'Mami Lulu, grand-mere passionnee de the depuis 50 ans, parle comme une grand-mere qui te raconte, glisse parfois des anecdotes de famille ou des blagues douces.'" />
+          <textarea value={f("mascot")} onChange={(e) => set("mascot", e.target.value)} rows={3} maxLength={2000} className="input-base" />
         </div>
-        {fields.map(([k, label, long]) => (
-          <div key={k}>
-            <label className="mb-1 block text-xs text-zinc-400">{label}</label>
-            {long ? (
-              <textarea value={f(k)} onChange={(e) => set(k, e.target.value)} rows={2} className={inputCls} />
-            ) : (
-              <input value={f(k)} onChange={(e) => set(k, e.target.value)} className={inputCls} />
-            )}
-          </div>
-        ))}
         <div>
-          <label className="mb-1 block text-xs text-zinc-400">Anti-AI patterns (formules a bannir)</label>
-          <div className="flex flex-wrap gap-2">
-            {Array.from(new Set([...ANTI_AI_PRESETS, ...activePatterns])).map((p) => (
+          <LabelHint label="Audience cible" />
+          <textarea value={f("audience")} onChange={(e) => set("audience", e.target.value)} rows={2} maxLength={2000} className="input-base" />
+        </div>
+      </section>
+
+      {/* 2. Carte auteur */}
+      <section className="card-base space-y-4">
+        <div>
+          <h3 className="flex items-center gap-2 text-sm font-semibold text-zinc-100"><UserCircle size={16} className="text-rose-300" /> Carte auteur</h3>
+          <p className="mt-1 text-xs text-zinc-500">Affichee dans la sidebar SCRO (bloc 5) et sous les articles. Photo + role + bio courte.</p>
+        </div>
+        <div className="grid gap-4 md:grid-cols-[120px_1fr]">
+          <div className="flex flex-col items-center gap-1.5">
+            <div className="h-24 w-24 overflow-hidden rounded-full border border-white/10 bg-white/[0.03]">
+              {f("author_photo_url") ? (
+                // eslint-disable-next-line @next/next/no-img-element
+                <img src={f("author_photo_url")} alt="" className="h-full w-full object-cover" />
+              ) : (
+                <div className="flex h-full w-full items-center justify-center text-zinc-700"><UserCircle size={48} /></div>
+              )}
+            </div>
+            <span className="text-[11px] text-zinc-600">Preview</span>
+          </div>
+          <div className="space-y-4">
+            <div>
+              <LabelHint label="Photo de l'auteur (URL Shopify CDN)" hint="Upload l'image dans Shopify admin > Content > Files puis copie l'URL cdn.shopify.com/... Format carre recommande (200x200+)." />
+              <input type="url" value={f("author_photo_url")} onChange={(e) => set("author_photo_url", e.target.value)} maxLength={500} className="input-base" placeholder="https://cdn.shopify.com/..." />
+            </div>
+            <div>
+              <LabelHint label="Role / sous-titre" hint="1 ligne sous le nom. Ex 'Moine bouddhiste & Auteur', 'Buddhist Monk & Author'." />
+              <input type="text" value={f("author_role")} onChange={(e) => set("author_role", e.target.value)} maxLength={120} className="input-base" />
+            </div>
+            <div>
+              <LabelHint label="Bio courte" hint="2 a 4 phrases. Affichee sous le role. Credibilite + histoire + valeur ajoutee." />
+              <textarea value={f("author_bio")} onChange={(e) => set("author_bio", e.target.value)} rows={4} maxLength={1500} className="input-base" />
+            </div>
+          </div>
+        </div>
+      </section>
+
+      {/* 3. Voix editoriale */}
+      <section className="card-base space-y-4">
+        <div>
+          <h3 className="flex items-center gap-2 text-sm font-semibold text-zinc-100"><Sparkles size={16} className="text-emerald-300" /> Voix editoriale</h3>
+          <p className="mt-1 text-xs text-zinc-500">Le ton, le rythme, le style. C&apos;est ce qui rend le contenu humain et identifiable.</p>
+        </div>
+        <div>
+          <LabelHint label="Description du ton" hint="Ex: Chaleureux, legerement malicieux. Comme une grand-mere qui te raconte sans le cote pedant. Phrases courtes, quelques expressions familieres, pas de jargon snob." />
+          <textarea value={f("tone_description")} onChange={(e) => set("tone_description", e.target.value)} rows={4} maxLength={5000} className="input-base" />
+        </div>
+        <div>
+          <LabelHint label="Exemples de phrases-types" hint="Quelques phrases (3 a 5) qu'on imaginerait dans un article. Claude s'en inspire en few-shot." />
+          <textarea value={f("example_phrases")} onChange={(e) => set("example_phrases", e.target.value)} rows={5} maxLength={5000} className="input-base font-mono text-xs" />
+        </div>
+      </section>
+
+      {/* 4. Regles anti-AI */}
+      <section className="card-base space-y-4">
+        <div>
+          <h3 className="flex items-center gap-2 text-sm font-semibold text-zinc-100"><ShieldOff size={16} className="text-emerald-300" /> Regles anti-AI</h3>
+          <p className="mt-1 text-xs text-zinc-500">Les tics d&apos;ecriture qui font crier &apos;ChatGPT&apos; a un lecteur. Coche ceux a bannir.</p>
+        </div>
+        <div className="grid gap-2 md:grid-cols-2">
+          {ANTI_AI_LABELS_FOR_UI.map((p) => {
+            const on = activePatterns.includes(p.key);
+            return (
               <button
-                key={p}
-                onClick={() => togglePattern(p)}
-                className={`rounded-full border px-2.5 py-1 text-xs ${
-                  activePatterns.includes(p) ? "border-emerald-600 bg-emerald-950/40 text-emerald-300" : "border-zinc-700 text-zinc-400"
-                }`}
+                key={p.key}
+                type="button"
+                onClick={() => togglePattern(p.key)}
+                className={cn(
+                  "flex items-center gap-2.5 rounded-lg border px-3 py-2.5 text-left text-xs transition",
+                  on ? "border-emerald-500/40 bg-emerald-500/[0.06] text-zinc-200" : "border-white/[0.05] bg-black/20 text-zinc-400 hover:border-white/15",
+                )}
               >
-                {p}
+                <span className={cn("flex h-4 w-4 shrink-0 items-center justify-center rounded border", on ? "border-emerald-500 bg-emerald-500 text-black" : "border-white/20")}>
+                  {on && <Check size={12} />}
+                </span>
+                {p.label}
               </button>
-            ))}
-          </div>
+            );
+          })}
         </div>
         <div>
-          <label className="mb-1 block text-xs text-zinc-400">Bio auteur</label>
-          <textarea value={f("author_bio")} onChange={(e) => set("author_bio", e.target.value)} rows={2} className={inputCls} />
+          <LabelHint label="Regles custom" hint="Patterns specifiques a ce site a bannir, 1 par ligne ou en phrases." />
+          <textarea value={f("anti_ai_custom")} onChange={(e) => set("anti_ai_custom", e.target.value)} rows={3} maxLength={3000} className="input-base" />
         </div>
-      </div>
+      </section>
 
-      <div className={`${cardCls} flex items-center gap-6`}>
+      {/* 5. Instructions bonus */}
+      <section className="card-base space-y-4">
         <div>
-          <label className="mb-1 block text-xs text-zinc-400">Articles / jour</label>
-          <input type="number" min={0} max={50} value={quota} onChange={(e) => setQuota(Number(e.target.value))} className={`${inputCls} w-24`} />
+          <h3 className="flex items-center gap-2 text-sm font-semibold text-zinc-100"><Wand2 size={16} className="text-emerald-300" /> Instructions bonus</h3>
+          <p className="mt-1 text-xs text-zinc-500">Tout ce qui n&apos;entre pas dans les cases precedentes : regles metier, contraintes, opportunites.</p>
         </div>
-        <label className="flex items-center gap-2 text-sm">
-          <input type="checkbox" checked={autoPub} onChange={(e) => setAutoPub(e.target.checked)} /> Publication auto
-        </label>
-      </div>
+        <div>
+          <LabelHint label="Instructions libres" hint="Ex: 'Quand pertinent, mentionne l'historique du the en Chine ou au Japon. Ne jamais conseiller un produit qu'on ne vend pas dans la boutique.'" />
+          <textarea value={f("bonus_instructions")} onChange={(e) => set("bonus_instructions", e.target.value)} rows={5} maxLength={3000} className="input-base" />
+        </div>
+      </section>
 
-      <button onClick={save} disabled={busy === "save"} className={primaryBtn}>
-        {busy === "save" ? <Loader2 size={16} className="animate-spin" /> : <CheckCircle2 size={16} />} Enregistrer
-      </button>
+      <div className="flex items-center gap-3">
+        <button onClick={save} disabled={busy === "save"} className="btn-primary">
+          {busy === "save" ? <Loader2 size={15} className="animate-spin" /> : <Check size={15} />} Enregistrer le profil
+        </button>
+        <button onClick={clearProfile} disabled={busy === "clear"} className="inline-flex items-center gap-2 text-sm font-medium text-red-400 transition hover:text-red-300 disabled:opacity-40">
+          {busy === "clear" ? <Loader2 size={15} className="animate-spin" /> : <Trash2 size={15} />} Effacer le profil
+        </button>
+      </div>
     </div>
   );
 }

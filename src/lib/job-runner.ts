@@ -5,6 +5,7 @@ import { analyzeSerp } from "./serp";
 import { generateBrief, writeArticle, editArticle, generateImagePrompt, refreshArticle, optimizeProductFull } from "./anthropic";
 import { generateCoverImage } from "./fal";
 import { assertNoAntiPatterns, assertPersonaIsolation } from "./guards";
+import { expandAntiAiPatterns } from "./anti-ai";
 import { classifyFailure, MAX_AUTO_RETRIES } from "./retry-classifier";
 import { sendAlert } from "./alerts";
 
@@ -85,7 +86,7 @@ export async function runJob(jobId: string): Promise<{ ok: boolean; error?: stri
       const article = await getArticle(creds.shop_domain, token, blogId, articleId);
       if (!article) throw new Error("article_not_found");
       const newBody = await refreshArticle(article.title, article.body_html || "", voice);
-      assertNoAntiPatterns(newBody, Array.isArray(voice.anti_ai_patterns) ? voice.anti_ai_patterns : []);
+      assertNoAntiPatterns(newBody, expandAntiAiPatterns(voice.anti_ai_patterns));
       await updateArticleBody(creds.shop_domain, token, blogId, articleId, newBody);
       const nowIso = new Date().toISOString();
       await supabase.from("site_optimizations").insert({
@@ -145,7 +146,7 @@ export async function runJob(jobId: string): Promise<{ ok: boolean; error?: stri
     const written = await writeArticle(brief, keyword, voiceWithLang);
 
     // 4. Editor + garde-fous
-    const extraBans = Array.isArray(voice.anti_ai_patterns) ? voice.anti_ai_patterns : [];
+    const extraBans = expandAntiAiPatterns(voice.anti_ai_patterns);
     const body = await editArticle(written.body_html, extraBans);
     assertNoAntiPatterns(body, extraBans);
     assertPersonaIsolation({

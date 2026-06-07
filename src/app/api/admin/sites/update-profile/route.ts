@@ -7,9 +7,10 @@ export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
 // Merge le voice_profile (passthrough des cles non fournies).
+// voice_profile = null => efface completement le profil.
 const schema = z.object({
   site_id: z.string().uuid(),
-  voice_profile: z.record(z.string(), z.any()),
+  voice_profile: z.record(z.string(), z.any()).nullable(),
 });
 
 export async function POST(req: NextRequest) {
@@ -25,7 +26,8 @@ export async function POST(req: NextRequest) {
     .eq("id", parsed.data.site_id)
     .single();
 
-  const merged = { ...(site?.voice_profile || {}), ...parsed.data.voice_profile };
+  const incoming = parsed.data.voice_profile;
+  const merged = incoming === null ? null : { ...(site?.voice_profile || {}), ...incoming };
   const { data, error } = await supabase
     .from("sites")
     .update({ voice_profile: merged, updated_at: new Date().toISOString() })
