@@ -199,6 +199,43 @@ export async function getDefaultBlogId(shop: string, token: string): Promise<num
   return blog.id as number;
 }
 
+export type ShopifyArticle = {
+  id: number;
+  title: string;
+  handle: string;
+  body_html: string;
+  summary_html: string;
+  tags: string[];
+  author: string;
+  created_at: string;
+  updated_at: string;
+  published_at: string | null;
+  image: string | null;
+};
+
+// Liste les articles du premier blog (lecture live, pagine simple jusqu'a limit).
+export async function listArticles(shop: string, token: string, blogId: number, limit = 250): Promise<ShopifyArticle[]> {
+  const res = await fetch(`${apiBase(shop)}/blogs/${blogId}/articles.json?limit=${Math.min(limit, 250)}`, {
+    headers: { "X-Shopify-Access-Token": token },
+    cache: "no-store",
+  });
+  if (!res.ok) throw new Error(`shopify_articles_failed:${res.status}`);
+  const data = await res.json();
+  return (data.articles || []).map((a: any) => ({
+    id: a.id,
+    title: a.title,
+    handle: a.handle,
+    body_html: a.body_html || "",
+    summary_html: a.summary_html || "",
+    tags: (a.tags || "").split(",").map((t: string) => t.trim()).filter(Boolean),
+    author: a.author || "",
+    created_at: a.created_at,
+    updated_at: a.updated_at,
+    published_at: a.published_at,
+    image: a.image?.src || null,
+  }));
+}
+
 export async function getArticle(shop: string, token: string, blogId: number, articleId: string | number) {
   const res = await fetch(`${apiBase(shop)}/blogs/${blogId}/articles/${articleId}.json`, {
     headers: { "X-Shopify-Access-Token": token },

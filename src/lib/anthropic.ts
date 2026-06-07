@@ -432,6 +432,46 @@ Reponds UNIQUEMENT en JSON:
   return a;
 }
 
+// Refresh d'un article existant : ameliore/actualise le contenu SANS toucher
+// aux images. Regle absolue #5 : ne jamais ecraser une image hero ni inline.
+export async function refreshArticle(
+  title: string,
+  currentBodyHtml: string,
+  voiceProfile: Record<string, any>
+): Promise<string> {
+  const c = client();
+  const lang = voiceProfile.content_language || "francais";
+  const persona = voiceProfile.mascot || voiceProfile.author_name;
+  const sys = `Tu es un editeur SEO qui rafraichit des articles existants en ${lang}${persona ? `, sous la plume de ${persona}` : ""}. ${STYLE_RULES}
+REGLE CRITIQUE : conserve TOUTES les balises <img ...> existantes a l'identique (meme src, meme position relative). Ne supprime, ne remplace, ne deplace aucune image.`;
+  const msg = await c.messages.create({
+    model: SONNET,
+    max_tokens: 8000,
+    system: sys,
+    messages: [
+      {
+        role: "user",
+        content: `Rafraichis cet article: ameliore la clarte, ajoute des infos actuelles, renforce le SEO, corrige le style. Garde la meme structure globale et TOUTES les images. Reponds uniquement avec le HTML complet du body, rien d'autre.
+
+Titre: ${title}
+HTML actuel:
+${currentBodyHtml.slice(0, 12000)}`,
+      },
+    ],
+  });
+  await logAnthropicUsage({ model: SONNET, usage: (msg as any).usage, context: "refresh" });
+  let out = stripEmDashes(msg.content.map((b) => (b.type === "text" ? b.text : "")).join("").trim());
+  out = out.replace(/^```html\s*/i, "").replace(/```$/i, "").trim();
+
+  // Garde-fou images : reinjecte toute image originale disparue.
+  const imgRe = /<img[^>]+src=["']([^"']+)["'][^>]*>/gi;
+  let m: RegExpExecArray | null;
+  while ((m = imgRe.exec(currentBodyHtml)) !== null) {
+    if (!out.includes(m[1])) out += `\n${m[0]}`;
+  }
+  return out;
+}
+
 // M4 SCRO: genere un paragraphe a injecter dans un article existant pour
 // renforcer le ranking d'une requete. Respecte STRICTEMENT la langue du site.
 export async function generateInjection(

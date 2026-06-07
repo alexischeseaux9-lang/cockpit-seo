@@ -177,8 +177,8 @@ export default function SiteDetail({ params }: { params: { siteId: string } }) {
 
         {msg && <p className="mb-4 rounded-lg border border-zinc-800 bg-zinc-900/40 p-3 text-sm text-zinc-300">{msg}</p>}
 
-        {password && tab === "blog" && <BlogTab siteId={siteId} api={api} setMsg={setMsg} />}
-        {password && tab === "archive" && <ArchiveTab siteId={siteId} api={api} />}
+        {password && tab === "blog" && <BlogTab siteId={siteId} site={site} api={api} setMsg={setMsg} />}
+        {password && tab === "archive" && <ArchiveTab siteId={siteId} api={api} setMsg={setMsg} />}
         {password && tab === "products" && <ProductsTab siteId={siteId} api={api} setMsg={setMsg} />}
         {password && tab === "categories" && <CategoriesTab siteId={siteId} api={api} setMsg={setMsg} />}
         {password && tab === "scro" && <ScroTab siteId={siteId} api={api} setMsg={setMsg} />}
@@ -193,95 +193,89 @@ export default function SiteDetail({ params }: { params: { siteId: string } }) {
 
 type ApiFn = (path: string, init?: RequestInit) => Promise<{ ok: boolean; json: any }>;
 
-function BlogTab({ siteId, api, setMsg }: { siteId: string; api: ApiFn; setMsg: (s: string | null) => void }) {
-  const [jobs, setJobs] = useState<Job[]>([]);
-  const [keywords, setKeywords] = useState("");
-  const [niche, setNiche] = useState("");
+function monthsSince(iso: string): number {
+  return (Date.now() - new Date(iso).getTime()) / (30 * 86_400_000);
+}
+
+function BlogTab({ siteId, site, api, setMsg }: { siteId: string; site: any; api: ApiFn; setMsg: (s: string | null) => void }) {
+  const [posts, setPosts] = useState<any[]>([]);
   const [busy, setBusy] = useState<string | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [filter, setFilter] = useState<"all" | "stale" | "draft">("all");
 
   const load = useCallback(async () => {
-    const { ok, json } = await api(`/api/admin/sites/${siteId}/jobs`);
-    if (ok) setJobs(json.jobs || []);
-  }, [siteId, api]);
+    setLoading(true);
+    const { ok, json } = await api(`/api/admin/sites/${siteId}/posts`);
+    setLoading(false);
+    if (ok) setPosts(json.posts || []); else setMsg(json.error || "Erreur lecture articles");
+  }, [siteId, api, setMsg]);
   useEffect(() => { load(); }, [load]);
 
-  async function enqueue() {
-    const list = keywords.split("\n").map((k) => k.trim()).filter(Boolean);
-    if (!list.length) return;
-    setBusy("enq");
-    const { ok, json } = await api(`/api/admin/sites/${siteId}/jobs`, { method: "POST", body: JSON.stringify({ keywords: list }) });
-    setBusy(null);
-    setMsg(ok ? `${json.enqueued} job(s) en file` : "Erreur");
-    if (ok) { setKeywords(""); load(); }
+  async function update(post: any) {
+    setBusy(post.external_id); setMsg("Refresh de l'article en cours (1 a 2 min, images preservees)...");
+    const { ok, json } = await api(`/api/admin/sites/${siteId}/blog-archive/refresh-one`, {
+      method: "POST",
+      body: JSON.stringify({ shopify_article_id: post.external_id, target_title: post.title }),
+    });
+    setBusy(null); setMsg(ok ? "Article rafraichi." : `Echec: ${json.error}`); load();
   }
-  async function scout() {
-    if (!niche.trim()) return;
-    setBusy("scout");
-    setMsg("Generation de mots-cles...");
-    const { ok, json } = await api(`/api/admin/sites/keyword-scout`, { method: "POST", body: JSON.stringify({ site_id: siteId, niche, count: 20, enqueue: true }) });
-    setBusy(null);
-    setMsg(ok ? `${json.enqueued} mots-cles generes et mis en file` : `Erreur: ${json.error}`);
-    if (ok) load();
-  }
-  async function runNow(id: string) {
-    setBusy(id);
-    setMsg("Generation en cours (1 a 2 min)...");
-    const { ok, json } = await api(`/api/admin/jobs/run`, { method: "POST", body: JSON.stringify({ job_id: id }) });
-    setBusy(null);
-    setMsg(ok ? "Article publie." : `Echec: ${json.error}`);
-    load();
-  }
+
+  const staleCount = posts.filter((p) => p.date && monthsSince(p.updated_at) >= 6).length;
+  const draftCount = posts.filter((p) => p.status !== "published").length;
+  const shown = posts.filter((p) =>
+    filter === "all" ? true : filter === "stale" ? monthsSince(p.updated_at) >= 6 : p.status !== "published"
+  );
+
+  const KPI = ({ label, value, hint }: { label: string; value: string; hint?: string }) => (
+    <div className={cardCls}><div className="text-[11px] uppercase tracking-wider text-zinc-500">{label}</div><div className="mt-1 text-2xl font-semibold text-zinc-100">{value}</div>{hint && <div className="text-xs text-zinc-500">{hint}</div>}</div>
+  );
+
+  if (loading) return <p className="text-sm text-zinc-400"><Loader2 size={14} className="inline animate-spin" /> Lecture des articles depuis Shopify...</p>;
 
   return (
-    <div className="space-y-6">
-      <div className={cardCls}>
-        <h3 className="mb-2 flex items-center gap-2 font-medium"><Plus size={16} /> Mots-cles (1 par ligne)</h3>
-        <textarea value={keywords} onChange={(e) => setKeywords(e.target.value)} rows={3} className={`${inputCls} mb-3`} placeholder={"comment laver des chaussettes en laine"} />
-        <button onClick={enqueue} disabled={busy === "enq" || !keywords.trim()} className={primaryBtn}>
-          {busy === "enq" ? <Loader2 size={16} className="animate-spin" /> : <Plus size={16} />} Mettre en file
-        </button>
+    <div className="space-y-5">
+      <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
+        <KPI label="Articles total" value={String(posts.length)} hint={`${draftCount} brouillon(s)`} />
+        <KPI label="A actualiser" value={String(staleCount)} hint="> 6 mois sans update" />
+        <KPI label="Quota auto" value={`${site?.daily_post_quota ?? 0} / j`} hint={`${(site?.daily_post_quota ?? 0) * 30}/mois max`} />
+        <KPI label="Quota refresh" value={`${site?.daily_update_quota ?? 0} / j`} hint="onglet Archive" />
       </div>
 
-      <div className={cardCls}>
-        <h3 className="mb-2 flex items-center gap-2 font-medium"><Sparkles size={16} /> Keyword scout (IA)</h3>
-        <p className="mb-2 text-xs text-zinc-500">Decris ta niche, l'IA genere 20 mots-cles et les met en file.</p>
-        <div className="flex gap-2">
-          <input value={niche} onChange={(e) => setNiche(e.target.value)} className={inputCls} placeholder="chaussettes en laine merinos pour la randonnee" />
-          <button onClick={scout} disabled={busy === "scout" || !niche.trim()} className={primaryBtn}>
-            {busy === "scout" ? <Loader2 size={16} className="animate-spin" /> : <Sparkles size={16} />} Generer
+      <div className="flex items-center gap-2">
+        {(["all", "stale", "draft"] as const).map((fl) => (
+          <button key={fl} onClick={() => setFilter(fl)} className={`rounded-full border px-2.5 py-1 text-xs ${filter === fl ? "border-emerald-600 text-emerald-300" : "border-zinc-700 text-zinc-400"}`}>
+            {fl === "all" ? `Tous (${posts.length})` : fl === "stale" ? `A actualiser (${staleCount})` : `Brouillons (${draftCount})`}
           </button>
-        </div>
+        ))}
+        <button onClick={load} className={`${ghostBtn} ml-auto`}><RefreshCwTab /> Rafraichir</button>
       </div>
 
-      <div>
-        <h3 className="mb-3 font-medium">Jobs ({jobs.length})</h3>
-        <div className="space-y-2">
-          {jobs.length === 0 && <p className="text-sm text-zinc-500">Aucun job.</p>}
-          {jobs.map((job) => (
-            <div key={job.id} className="flex items-center justify-between rounded-lg border border-zinc-800 bg-zinc-900/40 p-3">
+      <div className="space-y-2">
+        {shown.length === 0 && <p className="text-sm text-zinc-500">Aucun article dans ce filtre.</p>}
+        {shown.map((p) => {
+          const months = monthsSince(p.updated_at);
+          return (
+            <div key={p.external_id} className="flex items-center justify-between rounded-lg border border-zinc-800 bg-zinc-900/40 p-3">
               <div className="min-w-0">
-                <p className="truncate text-sm text-zinc-200">{job.keyword || job.kind}</p>
-                {job.error && <p className="truncate text-xs text-red-400">{job.error}</p>}
-                {job.output?.url && (
-                  <a href={job.output.url} target="_blank" rel="noreferrer" className="flex items-center gap-1 text-xs text-emerald-400">
-                    Voir l'article <ExternalLink size={12} />
-                  </a>
-                )}
+                <a href={p.url} target="_blank" rel="noreferrer" className="truncate text-sm text-zinc-200 hover:text-emerald-400">{p.title}</a>
+                <p className="text-xs text-zinc-500">
+                  {p.status === "published" ? "publie" : "brouillon"} · maj il y a {Math.round(months * 30)}j
+                  {months >= 6 && <span className="text-amber-400"> · a actualiser</span>}
+                </p>
               </div>
-              <div className="flex items-center gap-3">
-                <Status status={job.status} />
-                {(job.status === "pending" || job.status === "error") && (
-                  <button onClick={() => runNow(job.id)} disabled={busy === job.id} className={ghostBtn}>
-                    {busy === job.id ? <Loader2 size={12} className="animate-spin" /> : <Play size={12} />} Generer
-                  </button>
-                )}
-              </div>
+              <button onClick={() => update(p)} disabled={busy === p.external_id} className={ghostBtn}>
+                {busy === p.external_id ? <Loader2 size={12} className="animate-spin" /> : <Play size={12} />} Mettre a jour
+              </button>
             </div>
-          ))}
-        </div>
+          );
+        })}
       </div>
     </div>
   );
+}
+
+function RefreshCwTab() {
+  return <Wand2 size={12} />;
 }
 
 function RoadmapTab({ siteId, site, api, setMsg, onSiteChanged }: { siteId: string; site: any; api: ApiFn; setMsg: (s: string | null) => void; onSiteChanged: () => void }) {
@@ -423,28 +417,119 @@ function RoadmapTab({ siteId, site, api, setMsg, onSiteChanged }: { siteId: stri
   );
 }
 
-function ArchiveTab({ siteId, api }: { siteId: string; api: ApiFn }) {
-  const [articles, setArticles] = useState<any[]>([]);
-  useEffect(() => { api(`/api/admin/sites/${siteId}/articles`).then(({ ok, json }) => ok && setArticles(json.articles || [])); }, [siteId, api]);
+const FRESHNESS_META: Record<string, { dot: string; label: string; color: string }> = {
+  fresh: { dot: "bg-emerald-400", label: "A jour", color: "text-emerald-300" },
+  aging: { dot: "bg-amber-400", label: "Vieillissant", color: "text-amber-300" },
+  stale: { dot: "bg-red-400", label: "Perime", color: "text-red-300" },
+  never: { dot: "bg-zinc-500", label: "Jamais", color: "text-zinc-400" },
+};
+
+function ArchiveTab({ siteId, api, setMsg }: { siteId: string; api: ApiFn; setMsg: (s: string | null) => void }) {
+  const [data, setData] = useState<any>(null);
+  const [loading, setLoading] = useState(true);
+  const [filter, setFilter] = useState<string>("stale");
+  const [bulkN, setBulkN] = useState(3);
+  const [busy, setBusy] = useState<string | null>(null);
+
+  const load = useCallback(async () => {
+    setLoading(true);
+    const { ok, json } = await api(`/api/admin/sites/${siteId}/blog-archive`);
+    setLoading(false);
+    if (ok) setData(json); else setMsg(json.error || "Erreur");
+  }, [siteId, api, setMsg]);
+  useEffect(() => { load(); }, [load]);
+
+  async function setCadence(n: number) {
+    setBusy("cad");
+    const { ok, json } = await api(`/api/admin/sites/${siteId}/blog-archive/cadence`, { method: "POST", body: JSON.stringify({ daily_update_quota: n }) });
+    setBusy(null); setMsg(ok ? `Cadence reglee a ${n}/jour.` : `Erreur: ${json.error}`); load();
+  }
+  async function refreshOne(a: any) {
+    setBusy(a.id); setMsg("Regeneration en cours (images preservees)...");
+    const { ok, json } = await api(`/api/admin/sites/${siteId}/blog-archive/refresh-one`, { method: "POST", body: JSON.stringify({ shopify_article_id: a.id, target_title: a.title }) });
+    setBusy(null); setMsg(ok ? "Article regenere." : `Echec: ${json.error}`); load();
+  }
+  async function bulkRun() {
+    const targets = (data?.articles || []).filter((a: any) => a.freshness === "stale").slice(0, bulkN);
+    if (!targets.length) return;
+    setBusy("bulk"); setMsg(`Regeneration de ${targets.length} articles...`);
+    for (const a of targets) {
+      await api(`/api/admin/sites/${siteId}/blog-archive/refresh-one`, { method: "POST", body: JSON.stringify({ shopify_article_id: a.id, target_title: a.title }) });
+    }
+    setBusy(null); setMsg("Bulk termine."); load();
+  }
+
+  if (loading) return <p className="text-sm text-zinc-400"><Loader2 size={14} className="inline animate-spin" /> Lecture du catalogue...</p>;
+  if (!data) return <p className="text-sm text-zinc-500">Aucune donnee.</p>;
+
+  const s = data.stats;
+  const stats: [string, number][] = [["Total", s.total], ["A jour", s.fresh], ["Vieillissant", s.aging], ["Perimes", s.stale], ["En cours", s.running], ["En file", s.queued]];
+  const filters: [string, number][] = [["all", s.total], ["fresh", s.fresh], ["aging", s.aging], ["stale", s.stale]];
+  const shown = (data.articles || []).filter((a: any) => filter === "all" || a.freshness === filter);
+
   return (
-    <div className="space-y-3">
-      {articles.length === 0 && <p className="text-sm text-zinc-500">Aucun article publie.</p>}
-      {articles.map((a) => (
-        <div key={a.id} className={cardCls}>
-          <div className="flex items-start gap-3">
-            {a.cover_image_url && <img src={a.cover_image_url} alt="" className="h-16 w-24 rounded object-cover" />}
-            <div className="min-w-0">
-              <h4 className="font-medium text-zinc-100">{a.title}</h4>
-              {a.excerpt && <p className="mt-1 line-clamp-2 text-sm text-zinc-400">{a.excerpt}</p>}
-              {a.generation_metadata?.url && (
-                <a href={a.generation_metadata.url} target="_blank" rel="noreferrer" className="mt-2 flex items-center gap-1 text-xs text-emerald-400">
-                  Ouvrir <ExternalLink size={12} />
-                </a>
-              )}
-            </div>
-          </div>
+    <div className="space-y-5">
+      <div className="grid grid-cols-3 gap-2 md:grid-cols-6">
+        {stats.map(([label, val]) => (
+          <div key={label} className={`${cardCls} text-center`}><div className="text-xl font-semibold text-zinc-100">{val}</div><div className="text-[10px] uppercase text-zinc-500">{label}</div></div>
+        ))}
+      </div>
+
+      <div className={cardCls}>
+        <h3 className="mb-1 font-medium">Cadence auto-refresh</h3>
+        <p className="mb-3 text-xs text-zinc-500">Nombre d'articles perimes que le cron regenere chaque jour. 0 = manuel uniquement.</p>
+        <div className="flex gap-2">
+          {[0, 1, 3, 6].map((n) => (
+            <button key={n} onClick={() => setCadence(n)} disabled={busy === "cad"}
+              className={`rounded-lg border px-3 py-1.5 text-sm ${data.site.daily_update_quota === n ? "border-emerald-600 bg-emerald-950/30 text-emerald-300" : "border-zinc-700 text-zinc-400"}`}>
+              {n === 0 ? "Off" : `${n}/jour`}
+            </button>
+          ))}
         </div>
-      ))}
+      </div>
+
+      {s.stale > 0 && (
+        <div className={`${cardCls} flex flex-wrap items-center gap-3`}>
+          <span className="text-sm text-zinc-300">{s.stale} articles perimes regenerables</span>
+          <div className="flex gap-1">
+            {[3, 6, 10].map((n) => (
+              <button key={n} onClick={() => setBulkN(n)} className={`rounded px-2 py-1 text-xs ${bulkN === n ? "bg-white text-black" : "border border-zinc-700 text-zinc-400"}`}>{n}</button>
+            ))}
+          </div>
+          <button onClick={bulkRun} disabled={busy === "bulk"} className={primaryBtn}>
+            {busy === "bulk" ? <Loader2 size={14} className="animate-spin" /> : <Play size={14} />} Lancer {bulkN} maintenant
+          </button>
+        </div>
+      )}
+
+      <div className="flex items-center gap-2">
+        {filters.map(([f, n]) => (
+          <button key={f} onClick={() => setFilter(f)} className={`rounded-full border px-2.5 py-1 text-xs ${filter === f ? "border-emerald-600 text-emerald-300" : "border-zinc-700 text-zinc-400"}`}>
+            {f === "all" ? "Tous" : FRESHNESS_META[f].label} ({n})
+          </button>
+        ))}
+        <button onClick={load} className={`${ghostBtn} ml-auto`}><RefreshCwTab /> Rafraichir</button>
+      </div>
+
+      <div className="space-y-2">
+        {shown.slice(0, 200).map((a: any) => {
+          const fm = FRESHNESS_META[a.freshness] || FRESHNESS_META.never;
+          return (
+            <div key={a.id} className="flex items-center justify-between rounded-lg border border-zinc-800 bg-zinc-900/40 p-3">
+              <div className="flex min-w-0 items-center gap-3">
+                <span className={`h-2 w-2 shrink-0 rounded-full ${fm.dot}`} />
+                <div className="min-w-0">
+                  <a href={a.url} target="_blank" rel="noreferrer" className="truncate text-sm text-zinc-200 hover:text-emerald-400">{a.title}</a>
+                  <p className={`text-xs ${fm.color}`}>{fm.label} · {a.days_since_update}j {a.last_job?.status === "running" ? "· regen en cours" : ""}</p>
+                </div>
+              </div>
+              <button onClick={() => refreshOne(a)} disabled={busy === a.id} className={ghostBtn}>
+                {busy === a.id ? <Loader2 size={12} className="animate-spin" /> : <Play size={12} />} Regenerer
+              </button>
+            </div>
+          );
+        })}
+      </div>
     </div>
   );
 }

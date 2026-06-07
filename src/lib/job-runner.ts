@@ -1,8 +1,8 @@
 import { getServiceClient } from "./supabase";
 import { decryptCredentials } from "./credentials";
-import { ensureValidToken, getDefaultBlogId, publishArticle } from "./shopify";
+import { ensureValidToken, getDefaultBlogId, publishArticle, getArticle, updateArticleBody } from "./shopify";
 import { analyzeSerp } from "./serp";
-import { generateBrief, writeArticle, editArticle, generateImagePrompt } from "./anthropic";
+import { generateBrief, writeArticle, editArticle, generateImagePrompt, refreshArticle } from "./anthropic";
 import { generateCoverImage } from "./fal";
 import { assertNoAntiPatterns, assertPersonaIsolation } from "./guards";
 import { classifyError } from "./retry-classifier";
@@ -72,19 +72,39 @@ export async function runJob(jobId: string): Promise<{ ok: boolean; error?: stri
     .eq("id", jobId);
 
   try {
-    if (job.kind !== "generate_article") {
-      throw new Error(`unsupported_job_kind:${job.kind}`);
-    }
     if (!site.credentials_encrypted) throw new Error("site_not_connected");
-
-    const keyword: string = job.keyword || job.target_title || "";
-    if (!keyword) throw new Error("missing_keyword");
-
     const voice: Record<string, any> = site.voice_profile || {};
     const creds = decryptCredentials(site.credentials_encrypted);
-
-    // 0. Token valide (refresh auto si besoin)
     const token = await ensureValidToken(supabase, site.id, creds);
+
+    // --- kind: update_article (refresh d'un article existant, images preservees) ---
+    if (job.kind === "update_article") {
+      const articleId = job.target_external_id;
+      if (!articleId) throw new Error("missing_target_external_id");
+      const blogId = await getDefaultBlogId(creds.shop_domain, token);
+      const article = await getArticle(creds.shop_domain, token, blogId, articleId);
+      if (!article) throw new Error("article_not_found");
+      const newBody = await refreshArticle(article.title, article.body_html || "", voice);
+      assertNoAntiPatterns(newBody, Array.isArray(voice.anti_ai_patterns) ? voice.anti_ai_patterns : []);
+      await updateArticleBody(creds.shop_domain, token, blogId, articleId, newBody);
+      const nowIso = new Date().toISOString();
+      await supabase.from("site_optimizations").insert({
+        site_id: site.id, kind: "article_refreshed", target_type: "article",
+        target_id: String(articleId), target_title: article.title,
+        note: "Article rafraichi (images preservees)", source: "ai",
+      });
+      await supabase.from("site_jobs").update({
+        status: "done", output: { article_id: articleId, refreshed: true, title: article.title },
+        completed_at: nowIso, updated_at: nowIso,
+      }).eq("id", jobId);
+      await supabase.from("sites").update({ last_published_at: nowIso, updated_at: nowIso }).eq("id", site.id);
+      return { ok: true };
+    }
+
+    // --- kind: generate_article ---
+    if (job.kind !== "generate_article") throw new Error(`unsupported_job_kind:${job.kind}`);
+    const keyword: string = job.keyword || job.target_title || "";
+    if (!keyword) throw new Error("missing_keyword");
 
     // langue: voice_profile sinon locale boutique
     let lang = voice.content_language;
