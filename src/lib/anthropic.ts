@@ -297,6 +297,91 @@ Reponds UNIQUEMENT en JSON:
   return a;
 }
 
+// M5 V2: scoring rapide (Haiku) de l'etat actuel d'une fiche produit.
+export type ProductScore = { quality_score: number; quality_breakdown: Record<string, number>; notes: string[] };
+
+export async function scoreProduct(title: string, bodyHtml: string): Promise<ProductScore> {
+  const c = client();
+  const msg = await c.messages.create({
+    model: HAIKU,
+    max_tokens: 800,
+    system: `Tu audites des fiches produit e-commerce (SEO + CRO). ${STYLE_RULES}`,
+    messages: [
+      {
+        role: "user",
+        content: `Note cette fiche (0-100) sur: description, structure_headings, meta, social_proof, urgency, clarte.
+Titre: ${title}
+HTML: ${bodyHtml.slice(0, 2500) || "(vide)"}
+Reponds UNIQUEMENT en JSON: { "quality_score": <0-100>, "quality_breakdown": {"description":0-100,"headings":0-100,"meta":0-100,"social_proof":0-100,"urgency":0-100,"clarity":0-100}, "notes": ["2 a 4 problemes"] }`,
+      },
+    ],
+  });
+  const text = msg.content.map((b) => (b.type === "text" ? b.text : "")).join("");
+  return extractJson(text) as ProductScore;
+}
+
+// M5 V2: optimisation complete (Sonnet) avec channel_meta + cro_signals + body structure.
+export type ProductOptimized = {
+  title: string;
+  body_html: string;
+  image_alts: string[];
+  channel_meta: {
+    shopify: { title: string; meta_title: string; meta_description: string; tags: string[] };
+    google_shopping: { title: string; description: string; brand?: string; condition: string };
+    meta_ads: { headline: string; primary_text: string; description: string };
+  };
+  cro_signals: { urgency_present: boolean; social_proof_present: boolean; risk_reversal_present: boolean; delivery_clarity: boolean };
+  quality_score: number;
+};
+
+export async function optimizeProductFull(
+  title: string,
+  bodyHtml: string,
+  voiceProfile: Record<string, any>,
+  accent: string
+): Promise<ProductOptimized> {
+  const c = client();
+  const lang = voiceProfile.content_language || "francais";
+  const sys = `Tu es expert CRO + SEO e-commerce. Tu ecris en ${lang}. ${STYLE_RULES}
+Regles HTML: H2/H3 obligatoires avec le mot-cle ou variante long-tail (jamais "Description" ou "Key Benefits" generiques).
+Icones uniquement en SVG inline line-art (viewBox 24x24, stroke=currentColor), jamais d'emoji.
+Structure: hero, 3 trust badges (SVG inline), story (2-3 paragraphes), grille de 3-4 benefices, table de caracteristiques, liste d'entretien, FAQ.
+Utilise la couleur d'accent ${accent} dans les badges et separateurs.`;
+  const msg = await c.messages.create({
+    model: SONNET,
+    max_tokens: 6000,
+    system: sys,
+    messages: [
+      {
+        role: "user",
+        content: `Optimise cette fiche produit.
+Titre actuel: ${title}
+HTML actuel: ${bodyHtml.slice(0, 3000) || "(vide)"}
+Ton produit: ${voiceProfile.product_tone_description || voiceProfile.tone_description || "expert, rassurant"}
+
+Reponds UNIQUEMENT en JSON STRICT:
+{
+  "title": "titre optimise",
+  "body_html": "<HTML complet structure avec H2/H3, SVG inline, classes Tailwind inline pour H2 font-size>",
+  "image_alts": ["alt text par image"],
+  "channel_meta": {
+    "shopify": { "title": "", "meta_title": "<60c", "meta_description": "<155c", "tags": ["3-5 tags"] },
+    "google_shopping": { "title": "", "description": "", "brand": "", "condition": "new" },
+    "meta_ads": { "headline": "", "primary_text": "", "description": "" }
+  },
+  "cro_signals": { "urgency_present": true, "social_proof_present": true, "risk_reversal_present": true, "delivery_clarity": true },
+  "quality_score": <0-100>
+}`,
+      },
+    ],
+  });
+  const text = msg.content.map((b) => (b.type === "text" ? b.text : "")).join("");
+  const o = extractJson(text) as ProductOptimized;
+  o.title = stripEmDashes(o.title);
+  o.body_html = stripEmDashes(o.body_html);
+  return o;
+}
+
 // M5: optimisation d'une collection / categorie.
 export type CollectionAnalysis = {
   quality_score: number;

@@ -277,10 +277,15 @@ function ArchiveTab({ siteId, api }: { siteId: string; api: ApiFn }) {
   );
 }
 
+const FILTERS = ["all", "needs_work", "proposed", "applied", "not_audited"];
+
 function ProductsTab({ siteId, api, setMsg }: { siteId: string; api: ApiFn; setMsg: (s: string | null) => void }) {
   const [products, setProducts] = useState<any[]>([]);
   const [busy, setBusy] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
+  const [filter, setFilter] = useState("all");
+  const [sel, setSel] = useState<Set<string>>(new Set());
+  const pw = typeof window !== "undefined" ? localStorage.getItem(PW_KEY) || "" : "";
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -290,10 +295,16 @@ function ProductsTab({ siteId, api, setMsg }: { siteId: string; api: ApiFn; setM
   }, [siteId, api, setMsg]);
   useEffect(() => { load(); }, [load]);
 
-  async function audit(id: string) {
-    setBusy(id + "a"); setMsg("Audit IA en cours...");
-    const { ok, json } = await api(`/api/admin/sites/${siteId}/products/audit`, { method: "POST", body: JSON.stringify({ external_id: id }) });
-    setBusy(null); setMsg(ok ? "Audit termine, version proposee prete." : `Erreur: ${json.error}`); load();
+  async function auditAll() {
+    setBusy("auditall"); setMsg("Audit en masse (Haiku)...");
+    const { ok, json } = await api(`/api/admin/sites/${siteId}/products/audit-batch`, { method: "POST", body: JSON.stringify({ limit: 15 }) });
+    setBusy(null); setMsg(ok ? `${json.audited} produit(s) audites` : `Erreur: ${json.error}`); load();
+  }
+  async function optimizeSel() {
+    if (!sel.size) return;
+    setBusy("optsel"); setMsg(`Optimisation de ${sel.size} produit(s) (Sonnet)...`);
+    const { ok, json } = await api(`/api/admin/sites/${siteId}/products/optimize-batch`, { method: "POST", body: JSON.stringify({ external_ids: Array.from(sel) }) });
+    setBusy(null); setMsg(ok ? `${json.optimized} optimise(s)` : `Erreur: ${json.error}`); setSel(new Set()); load();
   }
   async function apply(id: string) {
     setBusy(id + "p"); setMsg("Application sur Shopify...");
@@ -305,14 +316,32 @@ function ProductsTab({ siteId, api, setMsg }: { siteId: string; api: ApiFn; setM
     const { ok, json } = await api(`/api/admin/sites/${siteId}/products/revert`, { method: "POST", body: JSON.stringify({ external_id: id }) });
     setBusy(null); setMsg(ok ? "Version d'origine restauree." : `Erreur: ${json.error}`); load();
   }
+  const toggle = (id: string) => setSel((s) => { const n = new Set(s); if (n.has(id)) n.delete(id); else n.add(id); return n; });
 
+  const shown = products.filter((p) => filter === "all" || p.status === filter);
   if (loading) return <p className="text-sm text-zinc-400"><Loader2 size={14} className="inline animate-spin" /> Chargement des produits Shopify...</p>;
+
   return (
-    <div className="space-y-2">
-      {products.length === 0 && <p className="text-sm text-zinc-500">Aucun produit.</p>}
-      {products.map((p) => (
+    <div className="space-y-3">
+      <div className="flex flex-wrap items-center gap-2">
+        {FILTERS.map((fl) => (
+          <button key={fl} onClick={() => setFilter(fl)} className={`rounded-full border px-2.5 py-1 text-xs ${filter === fl ? "border-emerald-600 text-emerald-300" : "border-zinc-700 text-zinc-400"}`}>{fl}</button>
+        ))}
+        <div className="ml-auto flex gap-2">
+          <button onClick={auditAll} disabled={busy === "auditall"} className={ghostBtn}>
+            {busy === "auditall" ? <Loader2 size={12} className="animate-spin" /> : <Wand2 size={12} />} Auditer tout
+          </button>
+          <button onClick={optimizeSel} disabled={busy === "optsel" || !sel.size} className={primaryBtn}>
+            {busy === "optsel" ? <Loader2 size={14} className="animate-spin" /> : <Sparkles size={14} />} Optimiser ({sel.size})
+          </button>
+        </div>
+      </div>
+
+      {shown.length === 0 && <p className="text-sm text-zinc-500">Aucun produit dans ce filtre.</p>}
+      {shown.map((p) => (
         <div key={p.external_id} className="flex items-center justify-between rounded-lg border border-zinc-800 bg-zinc-900/40 p-3">
           <div className="flex min-w-0 items-center gap-3">
+            <input type="checkbox" checked={sel.has(p.external_id)} onChange={() => toggle(p.external_id)} />
             {p.image && <img src={p.image} alt="" className="h-10 w-10 rounded object-cover" />}
             <div className="min-w-0">
               <p className="truncate text-sm text-zinc-200">{p.title}</p>
@@ -320,16 +349,18 @@ function ProductsTab({ siteId, api, setMsg }: { siteId: string; api: ApiFn; setM
             </div>
           </div>
           <div className="flex items-center gap-2">
-            <button onClick={() => audit(p.external_id)} disabled={busy === p.external_id + "a"} className={ghostBtn}>
-              {busy === p.external_id + "a" ? <Loader2 size={12} className="animate-spin" /> : <Wand2 size={12} />} Auditer
-            </button>
+            {(p.status === "proposed" || p.status === "applied") && (
+              <a href={`/api/admin/sites/${siteId}/products/preview?external_id=${encodeURIComponent(p.external_id)}&pw=${encodeURIComponent(pw)}`} target="_blank" rel="noreferrer" className={ghostBtn}>
+                <ExternalLink size={12} /> Preview
+              </a>
+            )}
             {(p.status === "proposed" || p.status === "applied") && (
               <button onClick={() => apply(p.external_id)} disabled={busy === p.external_id + "p"} className={ghostBtn}>
                 {busy === p.external_id + "p" ? <Loader2 size={12} className="animate-spin" /> : <UploadCloud size={12} />} Appliquer
               </button>
             )}
             {p.status === "applied" && (
-              <button onClick={() => revert(p.external_id)} disabled={busy === p.external_id + "r"} className={ghostBtn} title="Restaurer la version d'origine">
+              <button onClick={() => revert(p.external_id)} disabled={busy === p.external_id + "r"} className={ghostBtn} title="Restaurer l'origine">
                 {busy === p.external_id + "r" ? <Loader2 size={12} className="animate-spin" /> : <Undo2 size={12} />} Annuler
               </button>
             )}
@@ -353,10 +384,17 @@ function CategoriesTab({ siteId, api, setMsg }: { siteId: string; api: ApiFn; se
   }, [siteId, api, setMsg]);
   useEffect(() => { load(); }, [load]);
 
+  const [histFor, setHistFor] = useState<any>(null);
+
   async function analyze(id: string) {
     setBusy(id + "a"); setMsg("Analyse IA en cours...");
     const { ok, json } = await api(`/api/admin/sites/${siteId}/taxonomies/analyze`, { method: "POST", body: JSON.stringify({ tax_id: id }) });
     setBusy(null); setMsg(ok ? "Version optimisee prete." : `Erreur: ${json.error}`); load();
+  }
+  async function genImage(id: string) {
+    setBusy(id + "i"); setMsg("Generation de l'image de collection (fal)...");
+    const { ok, json } = await api(`/api/admin/sites/${siteId}/taxonomies/image`, { method: "POST", body: JSON.stringify({ tax_id: id }) });
+    setBusy(null); setMsg(ok ? "Image generee et poussee." : `Erreur: ${json.error}`); load();
   }
   async function push(id: string) {
     setBusy(id + "p"); setMsg("Push sur Shopify...");
@@ -379,6 +417,10 @@ function CategoriesTab({ siteId, api, setMsg }: { siteId: string; api: ApiFn; se
             </div>
           </div>
           <div className="flex items-center gap-2">
+            <button onClick={() => setHistFor(t)} className={ghostBtn}><History size={12} /> Historique</button>
+            <button onClick={() => genImage(t.id)} disabled={busy === t.id + "i"} className={ghostBtn} title="Toujours actif">
+              {busy === t.id + "i" ? <Loader2 size={12} className="animate-spin" /> : <ImageIcon size={12} />} {t.suggested_image_url ? "Re-generer image" : "Image"}
+            </button>
             <button onClick={() => analyze(t.id)} disabled={busy === t.id + "a"} className={ghostBtn}>
               {busy === t.id + "a" ? <Loader2 size={12} className="animate-spin" /> : <Wand2 size={12} />} Analyser
             </button>
@@ -390,6 +432,47 @@ function CategoriesTab({ siteId, api, setMsg }: { siteId: string; api: ApiFn; se
           </div>
         </div>
       ))}
+      {histFor && <HistoryDrawer siteId={siteId} api={api} tax={histFor} onClose={() => setHistFor(null)} />}
+    </div>
+  );
+}
+
+function HistoryDrawer({ siteId, api, tax, onClose }: { siteId: string; api: ApiFn; tax: any; onClose: () => void }) {
+  const [events, setEvents] = useState<any[]>([]);
+  useEffect(() => {
+    api(`/api/admin/sites/${siteId}/optimizations?target_id=${tax.id}`).then(({ ok, json }) => ok && setEvents(json.optimizations || []));
+  }, [siteId, api, tax.id]);
+  const isImg = (v?: string) => typeof v === "string" && /^https?:\/\//.test(v);
+  return (
+    <div className="fixed inset-0 z-50 flex justify-end bg-black/60">
+      <div className="h-full w-full max-w-xl overflow-y-auto border-l border-zinc-800 bg-zinc-950 p-6">
+        <div className="mb-4 flex items-center justify-between">
+          <h2 className="font-semibold">Historique: {tax.name}</h2>
+          <button onClick={onClose} className="text-zinc-400 hover:text-zinc-100"><Undo2 size={18} /></button>
+        </div>
+        {events.length === 0 && <p className="text-sm text-zinc-500">Aucun evenement.</p>}
+        <div className="space-y-3">
+          {events.map((e) => (
+            <div key={e.id} className="rounded-lg border border-zinc-800 bg-zinc-900/40 p-3">
+              <div className="mb-1 flex items-center justify-between">
+                <span className="text-sm text-zinc-200">{e.kind}</span>
+                <span className="text-xs text-zinc-500">{new Date(e.done_at).toLocaleString()} · {e.source}</span>
+              </div>
+              {e.note && <p className="mb-2 text-xs text-zinc-500">{e.note}</p>}
+              <div className="grid grid-cols-2 gap-2 text-xs">
+                <div>
+                  <p className="mb-1 text-zinc-500">Avant</p>
+                  {isImg(e.before_value) ? <img src={e.before_value} alt="" className="rounded" /> : <p className="line-clamp-4 text-zinc-400">{e.before_value || "-"}</p>}
+                </div>
+                <div>
+                  <p className="mb-1 text-zinc-500">Apres</p>
+                  {isImg(e.after_value) ? <img src={e.after_value} alt="" className="rounded" /> : <p className="line-clamp-4 text-zinc-400">{e.after_value || "-"}</p>}
+                </div>
+              </div>
+            </div>
+          ))}
+        </div>
+      </div>
     </div>
   );
 }

@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import { isAdmin, unauthorized } from "@/lib/auth";
-import { getSiteContext } from "@/lib/site-context";
+import { getSiteContext, logChange } from "@/lib/site-context";
 import { analyzeCollection } from "@/lib/anthropic";
 
 export const runtime = "nodejs";
@@ -43,6 +43,19 @@ export async function POST(req: NextRequest, { params }: { params: { siteId: str
       .select()
       .single();
     if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+
+    await logChange({
+      siteId: params.siteId,
+      kind: "collection_optimized_draft",
+      target_type: "collection",
+      target_id: parsed.data.tax_id,
+      target_title: tax.name,
+      before_value: tax.current_description || undefined,
+      after_value: analysis.suggested_description_html,
+      note: "Version optimisee draftee",
+      source: "ai",
+    });
+
     return NextResponse.json({ taxonomy: data });
   } catch (e) {
     return NextResponse.json({ error: e instanceof Error ? e.message : "error" }, { status: 500 });

@@ -169,6 +169,24 @@ export async function updateCollection(
   if (!res.ok) throw new Error(`shopify_collection_update_failed:${res.status}`);
 }
 
+export async function updateCollectionImage(
+  shop: string,
+  token: string,
+  collectionId: string | number,
+  kind: "custom" | "smart",
+  imageUrl: string
+): Promise<void> {
+  const key = kind === "custom" ? "custom_collection" : "smart_collection";
+  const path = kind === "custom" ? "custom_collections" : "smart_collections";
+  const res = await fetch(`${apiBase(shop)}/${path}/${collectionId}.json`, {
+    method: "PUT",
+    headers: { "X-Shopify-Access-Token": token, "Content-Type": "application/json" },
+    body: JSON.stringify({ [key]: { id: Number(collectionId), image: { src: imageUrl } } }),
+    cache: "no-store",
+  });
+  if (!res.ok) throw new Error(`shopify_collection_image_failed:${res.status}`);
+}
+
 export async function getDefaultBlogId(shop: string, token: string): Promise<number> {
   const res = await fetch(`${apiBase(shop)}/blogs.json`, {
     headers: { "X-Shopify-Access-Token": token },

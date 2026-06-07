@@ -41,13 +41,13 @@ export async function POST(req: NextRequest, { params }: { params: { siteId: str
 
     await logChange({
       siteId: params.siteId,
-      kind: "collection_optimized",
+      kind: "collection_pushed_live",
       target_type: "collection",
       target_id: tax.id,
       target_title: tax.name,
       before_value: tax.current_description || "",
       after_value: tax.suggested_description_html,
-      note: "Description collection optimisee et poussee",
+      note: "Description collection poussee en live",
       source: "ai",
     });
 

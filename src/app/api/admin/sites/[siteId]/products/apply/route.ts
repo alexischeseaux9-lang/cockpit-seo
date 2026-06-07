@@ -31,11 +31,13 @@ export async function POST(req: NextRequest, { params }: { params: { siteId: str
     const original = await getProduct(shop, token, parsed.data.external_id);
 
     const pp = audit.proposed_payload as any;
+    // Supporte l'ancien shape (meta_title direct) et le V2 (channel_meta.shopify)
+    const shopifyMeta = pp.channel_meta?.shopify || {};
     await updateProduct(shop, token, parsed.data.external_id, {
       title: pp.title,
       body_html: pp.body_html,
-      metaTitle: pp.meta_title,
-      metaDescription: pp.meta_description,
+      metaTitle: shopifyMeta.meta_title || pp.meta_title,
+      metaDescription: shopifyMeta.meta_description || pp.meta_description,
     });
 
     const now = new Date().toISOString();
