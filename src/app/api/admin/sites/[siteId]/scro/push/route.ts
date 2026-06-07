@@ -1,56 +1,58 @@
 import { NextRequest, NextResponse } from "next/server";
-import { z } from "zod";
 import { isAdmin, unauthorized } from "@/lib/auth";
-import { getSiteContext, logChange } from "@/lib/site-context";
-import { getDefaultBlogId, getArticle, updateArticleBody } from "@/lib/shopify";
+import { getSiteContext } from "@/lib/site-context";
+import { listThemes, getThemeAsset, putThemeAsset } from "@/lib/shopify";
+import { buildScroLiquid, injectScro, defaultBranding } from "@/lib/cro/builder";
+import { NEUTRAL_ICONS } from "@/lib/cro/icon-generator";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 export const maxDuration = 120;
 
-// Push live: ajoute le paragraphe d'injection a l'article Shopify cible.
-const schema = z.object({ id: z.string().uuid() });
+const DEFAULT_ASSET = "sections/main-article.liquid";
 
+// POST: build le Liquid CRO et l'injecte dans le theme actif (entre markers).
 export async function POST(req: NextRequest, { params }: { params: { siteId: string } }) {
   if (!isAdmin(req)) return unauthorized();
-  const body = await req.json().catch(() => null);
-  const parsed = schema.safeParse(body);
-  if (!parsed.success) return NextResponse.json({ error: "bad_request" }, { status: 400 });
-
   try {
-    const { supabase, shop, token } = await getSiteContext(params.siteId);
-    const { data: row } = await supabase.from("site_scro_queries").select("*").eq("id", parsed.data.id).single();
-    if (!row?.suggested_injection || !row.injected_into_post_id) {
-      return NextResponse.json({ error: "no_injection_or_target" }, { status: 422 });
-    }
-    const { data: post } = await supabase.from("blog_posts").select("*").eq("id", row.injected_into_post_id).single();
-    const articleId = post?.generation_metadata?.article_id;
-    if (!articleId) return NextResponse.json({ error: "post_has_no_shopify_article_id" }, { status: 422 });
+    const { supabase, shop, token, voice } = await getSiteContext(params.siteId);
+    const { data: config } = await supabase.from("site_cro_configs").select("*").eq("site_id", params.siteId).maybeSingle();
+    if (!config) return NextResponse.json({ error: "no_config" }, { status: 404 });
 
-    const blogId = await getDefaultBlogId(shop, token);
-    const article = await getArticle(shop, token, blogId, articleId);
-    if (!article) return NextResponse.json({ error: "shopify_article_not_found" }, { status: 404 });
+    // theme cible : configure sinon theme principal (role=main)
+    const themes = await listThemes(shop, token);
+    const themeId = config.theme_id || themes.find((t) => t.role === "main")?.id || themes[0]?.id;
+    if (!themeId) return NextResponse.json({ error: "no_theme" }, { status: 404 });
+    const assetKey = config.target_asset_key || DEFAULT_ASSET;
 
-    const newBody = `${article.body_html || ""}\n${row.suggested_injection}`;
-    await updateArticleBody(shop, token, blogId, articleId, newBody);
+    const branding = defaultBranding(voice);
+    const persona = { name: voice.author_name || voice.mascot || "", role: voice.author_role || "", bio: voice.author_bio || "" };
+    const icons = voice.sidebar_icons || NEUTRAL_ICONS;
 
-    const now = new Date().toISOString();
-    await supabase.from("site_scro_queries").update({ pushed_at: now }).eq("id", row.id);
-    await supabase.from("blog_posts").update({ content: newBody }).eq("id", post.id);
-
-    await logChange({
-      siteId: params.siteId,
-      kind: "scro_injection_pushed",
-      target_type: "article",
-      target_id: String(articleId),
-      target_title: post.title,
-      after_value: row.suggested_injection,
-      note: `Injection pour la requete "${row.query}"`,
-      source: "ai",
+    const liquid = buildScroLiquid({
+      inlineEnabled: config.inline_enabled,
+      sidebarEnabled: config.sidebar_enabled,
+      blocks: config.blocks || [],
+      sidebarCfg: config.sidebar || null,
+      branding,
+      persona,
+      icons,
     });
 
-    return NextResponse.json({ ok: true });
+    const current = (await getThemeAsset(shop, token, themeId, assetKey)) || "";
+    const next = injectScro(current, liquid);
+
+    const now = new Date().toISOString();
+    try {
+      await putThemeAsset(shop, token, themeId, assetKey, next);
+      await supabase.from("site_cro_configs").update({ theme_id: String(themeId), target_asset_key: assetKey, last_pushed_at: now, last_push_status: "ok", last_push_error: null }).eq("site_id", params.siteId);
+      return NextResponse.json({ ok: true, theme_id: themeId, asset_key: assetKey });
+    } catch (e) {
+      const msg = e instanceof Error ? e.message : "push_failed";
+      await supabase.from("site_cro_configs").update({ last_push_status: "error", last_push_error: msg, updated_at: now }).eq("site_id", params.siteId);
+      return NextResponse.json({ error: msg }, { status: 500 });
+    }
   } catch (e) {
-    return NextResponse.json({ error: e instanceof Error ? e.message : "push_failed" }, { status: 500 });
+    return NextResponse.json({ error: e instanceof Error ? e.message : "error" }, { status: 500 });
   }
 }

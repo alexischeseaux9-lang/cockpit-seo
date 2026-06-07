@@ -199,6 +199,46 @@ export async function getDefaultBlogId(shop: string, token: string): Promise<num
   return blog.id as number;
 }
 
+// ---- Themes (SCRO) ----
+export type ShopifyTheme = { id: number; name: string; role: string; updated_at: string };
+
+export async function listThemes(shop: string, token: string): Promise<ShopifyTheme[]> {
+  const res = await fetch(`${apiBase(shop)}/themes.json`, {
+    headers: { "X-Shopify-Access-Token": token },
+    cache: "no-store",
+  });
+  if (!res.ok) throw new Error(`shopify_themes_failed:${res.status}`);
+  const data = await res.json();
+  return (data.themes || []).map((t: any) => ({ id: t.id, name: t.name, role: t.role, updated_at: t.updated_at }));
+}
+
+export async function getThemeAsset(shop: string, token: string, themeId: string | number, key: string): Promise<string | null> {
+  const url = `${apiBase(shop)}/themes/${themeId}/assets.json?asset[key]=${encodeURIComponent(key)}`;
+  const res = await fetch(url, { headers: { "X-Shopify-Access-Token": token }, cache: "no-store" });
+  if (res.status === 404) return null;
+  if (!res.ok) throw new Error(`shopify_asset_get_failed:${res.status}`);
+  const data = await res.json();
+  return data.asset?.value ?? null;
+}
+
+export async function putThemeAsset(shop: string, token: string, themeId: string | number, key: string, value: string): Promise<void> {
+  const res = await fetch(`${apiBase(shop)}/themes/${themeId}/assets.json`, {
+    method: "PUT",
+    headers: { "X-Shopify-Access-Token": token, "Content-Type": "application/json" },
+    body: JSON.stringify({ asset: { key, value } }),
+    cache: "no-store",
+  });
+  if (!res.ok) {
+    const body = await res.text();
+    throw new Error(`shopify_asset_put_failed:${res.status}:${body.slice(0, 200)}`);
+  }
+}
+
+export async function listCollectionsLite(shop: string, token: string): Promise<{ handle: string; title: string; image: string | null; productsCount: number }[]> {
+  const cols = await listCollections(shop, token);
+  return cols.map((c) => ({ handle: c.handle, title: c.title, image: null, productsCount: 0 }));
+}
+
 export type ShopifyArticle = {
   id: number;
   title: string;
