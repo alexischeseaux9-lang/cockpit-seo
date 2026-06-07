@@ -20,12 +20,20 @@ export async function GET(req: NextRequest, { params }: { params: { siteId: stri
   return NextResponse.json({ jobs: data });
 }
 
+const itemSchema = z.object({
+  keyword: z.string().min(1),
+  brief: z.string().nullable().optional(),
+  priority: z.number().int().optional(),
+  target_blog_hint: z.string().nullable().optional(),
+});
 const enqueueSchema = z.object({
-  keywords: z.array(z.string().min(1)).min(1),
+  // Deux formes acceptees : mots-cles simples OU items riches (Roadmap bulk).
+  keywords: z.array(z.string().min(1)).optional(),
+  items: z.array(itemSchema).optional(),
   priority: z.number().int().optional(),
 });
 
-// POST: empile des jobs generate_article (1 par mot-cle)
+// POST: empile des jobs generate_article (simple ou bulk riche)
 export async function POST(req: NextRequest, { params }: { params: { siteId: string } }) {
   if (!isAdmin(req)) return unauthorized();
   const body = await req.json().catch(() => null);
@@ -33,13 +41,21 @@ export async function POST(req: NextRequest, { params }: { params: { siteId: str
   if (!parsed.success) {
     return NextResponse.json({ error: parsed.error.flatten() }, { status: 400 });
   }
+  const items: { keyword: string; brief?: string | null; priority?: number; target_blog_hint?: string | null }[] =
+    parsed.data.items && parsed.data.items.length
+      ? parsed.data.items
+      : (parsed.data.keywords || []).map((k) => ({ keyword: k }));
+  if (!items.length) return NextResponse.json({ error: "no_keywords" }, { status: 400 });
+
   const supabase = getServiceClient();
-  const rows = parsed.data.keywords.map((kw, i) => ({
+  const rows = items.map((it, i) => ({
     site_id: params.siteId,
     kind: "generate_article",
     status: "pending",
-    keyword: kw,
-    priority: parsed.data.priority ?? 5 + i,
+    keyword: it.keyword,
+    brief: it.brief ?? null,
+    target_blog_hint: it.target_blog_hint ?? null,
+    priority: it.priority ?? parsed.data.priority ?? 5 + i,
   }));
   const { data, error } = await supabase.from("site_jobs").insert(rows).select("id");
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });

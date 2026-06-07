@@ -21,7 +21,18 @@ import {
   Undo2,
   BarChart3,
   Globe,
+  Archive,
+  ShoppingBag,
+  Map,
+  UserCircle,
+  Tag,
+  Zap,
+  ZapOff,
+  ListPlus,
+  Check,
+  Trash2,
 } from "lucide-react";
+import { parseKeywordInput, type ParseResult } from "@/lib/sites/csv-parser";
 
 const LANGUAGES = ["francais", "anglais", "allemand", "italien", "espagnol", "neerlandais"];
 
@@ -36,17 +47,19 @@ type Job = {
   output: any;
 };
 
-type TabId = "blog" | "archive" | "profil" | "products" | "categories" | "scro" | "image" | "history";
+type TabId = "blog" | "archive" | "image" | "scro" | "roadmap" | "profil" | "products" | "categories" | "optimizations";
 
+// Ordre EXACT du master prompt V3.
 const TABS: { id: TabId; label: string; icon: JSX.Element }[] = [
   { id: "blog", label: "Blog", icon: <FileText size={14} /> },
-  { id: "archive", label: "Archive", icon: <FileText size={14} /> },
-  { id: "products", label: "Produits", icon: <Package size={14} /> },
-  { id: "categories", label: "Categories", icon: <FolderTree size={14} /> },
-  { id: "scro", label: "SCRO", icon: <BarChart3 size={14} /> },
-  { id: "profil", label: "Profil", icon: <User size={14} /> },
+  { id: "archive", label: "Archive", icon: <Archive size={14} /> },
   { id: "image", label: "Image Lab", icon: <ImageIcon size={14} /> },
-  { id: "history", label: "Historique", icon: <History size={14} /> },
+  { id: "scro", label: "SCRO", icon: <ShoppingBag size={14} /> },
+  { id: "roadmap", label: "Roadmap", icon: <Map size={14} /> },
+  { id: "profil", label: "Profil", icon: <UserCircle size={14} /> },
+  { id: "products", label: "Produits", icon: <Package size={14} /> },
+  { id: "categories", label: "Product Categories", icon: <Tag size={14} /> },
+  { id: "optimizations", label: "Optimisations", icon: <Sparkles size={14} /> },
 ];
 
 function Status({ status }: { status: string }) {
@@ -152,6 +165,12 @@ export default function SiteDetail({ params }: { params: { siteId: string } }) {
               }`}
             >
               {t.icon} {t.label}
+              {t.id === "roadmap" && site && (
+                <span className="rounded border border-zinc-700 px-1 text-[10px] text-zinc-400">{site.daily_post_quota ?? 0}/j</span>
+              )}
+              {t.id === "profil" && site?.voice_profile && Object.keys(site.voice_profile).length > 0 && (
+                <Check size={11} className="text-emerald-400" />
+              )}
             </button>
           ))}
         </div>
@@ -163,9 +182,10 @@ export default function SiteDetail({ params }: { params: { siteId: string } }) {
         {password && tab === "products" && <ProductsTab siteId={siteId} api={api} setMsg={setMsg} />}
         {password && tab === "categories" && <CategoriesTab siteId={siteId} api={api} setMsg={setMsg} />}
         {password && tab === "scro" && <ScroTab siteId={siteId} api={api} setMsg={setMsg} />}
+        {password && tab === "roadmap" && <RoadmapTab siteId={siteId} site={site} api={api} setMsg={setMsg} onSiteChanged={loadSite} />}
         {password && tab === "profil" && <ProfilTab siteId={siteId} api={api} setMsg={setMsg} onSaved={loadSite} />}
         {password && tab === "image" && <ImageTab siteId={siteId} api={api} setMsg={setMsg} />}
-        {password && tab === "history" && <HistoryTab siteId={siteId} api={api} />}
+        {password && tab === "optimizations" && <HistoryTab siteId={siteId} api={api} />}
       </div>
     </main>
   );
@@ -247,6 +267,145 @@ function BlogTab({ siteId, api, setMsg }: { siteId: string; api: ApiFn; setMsg: 
                     Voir l'article <ExternalLink size={12} />
                   </a>
                 )}
+              </div>
+              <div className="flex items-center gap-3">
+                <Status status={job.status} />
+                {(job.status === "pending" || job.status === "error") && (
+                  <button onClick={() => runNow(job.id)} disabled={busy === job.id} className={ghostBtn}>
+                    {busy === job.id ? <Loader2 size={12} className="animate-spin" /> : <Play size={12} />} Generer
+                  </button>
+                )}
+              </div>
+            </div>
+          ))}
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function RoadmapTab({ siteId, site, api, setMsg, onSiteChanged }: { siteId: string; site: any; api: ApiFn; setMsg: (s: string | null) => void; onSiteChanged: () => void }) {
+  const [jobs, setJobs] = useState<Job[]>([]);
+  const [keyword, setKeyword] = useState("");
+  const [brief, setBrief] = useState("");
+  const [raw, setRaw] = useState("");
+  const [busy, setBusy] = useState<string | null>(null);
+  const [parsed, setParsed] = useState<ParseResult | null>(null);
+
+  const load = useCallback(async () => {
+    const { ok, json } = await api(`/api/admin/sites/${siteId}/jobs`);
+    if (ok) setJobs(json.jobs || []);
+  }, [siteId, api]);
+  useEffect(() => { load(); }, [load]);
+
+  const quota = site?.daily_post_quota ?? 0;
+  const autoOn = !!site?.auto_publish_enabled;
+  const pending = jobs.filter((j) => j.status === "pending").length;
+  const inProgress = jobs.filter((j) => j.status === "in_progress").length;
+  const doneCount = jobs.filter((j) => j.status === "done").length;
+  const queueSize = pending + inProgress;
+  const blockedReason = site?.connection_status !== "connected" ? "Site non connecte" : quota === 0 ? "Quota daily a 0" : null;
+
+  async function toggleAuto() {
+    setBusy("auto");
+    const { ok, json } = await api(`/api/admin/sites/update`, { method: "POST", body: JSON.stringify({ site_id: siteId, auto_publish_enabled: !autoOn }) });
+    setBusy(null); setMsg(ok ? (autoOn ? "Auto-publish desactive." : "Auto-publish active.") : `Erreur: ${json.error}`);
+    if (ok) onSiteChanged();
+  }
+  async function addSingle() {
+    if (keyword.trim().length < 2) return;
+    setBusy("single");
+    const { ok, json } = await api(`/api/admin/sites/${siteId}/jobs`, { method: "POST", body: JSON.stringify({ items: [{ keyword: keyword.trim(), brief: brief.trim() || null }] }) });
+    setBusy(null); setMsg(ok ? "Mot-cle ajoute a la roadmap." : `Erreur: ${json.error}`);
+    if (ok) { setKeyword(""); setBrief(""); load(); }
+  }
+  function onRaw(v: string) { setRaw(v); setParsed(v.trim() ? parseKeywordInput(v) : null); }
+  async function importBulk() {
+    if (!parsed?.keywords.length) return;
+    setBusy("bulk");
+    const items = parsed.keywords.map((k) => ({ keyword: k.keyword, brief: k.brief, priority: k.priority, target_blog_hint: k.targetBlogHint || null }));
+    const { ok, json } = await api(`/api/admin/sites/${siteId}/jobs`, { method: "POST", body: JSON.stringify({ items }) });
+    setBusy(null); setMsg(ok ? `${json.enqueued} mots-cles importes.` : `Erreur: ${json.error}`);
+    if (ok) { setRaw(""); setParsed(null); load(); }
+  }
+  async function runNow(id: string) {
+    setBusy(id); setMsg("Generation en cours (1 a 2 min)...");
+    const { ok, json } = await api(`/api/admin/jobs/run`, { method: "POST", body: JSON.stringify({ job_id: id }) });
+    setBusy(null); setMsg(ok ? "Article publie." : `Echec: ${json.error}`); load();
+  }
+
+  const KPI = ({ label, value, hint }: { label: string; value: string; hint?: string }) => (
+    <div className={cardCls}><div className="text-[11px] uppercase tracking-wider text-zinc-500">{label}</div><div className="mt-1 text-2xl font-semibold text-zinc-100">{value}</div>{hint && <div className="text-xs text-zinc-500">{hint}</div>}</div>
+  );
+
+  return (
+    <div className="space-y-5">
+      <div className={`${cardCls} flex items-center justify-between`}>
+        <div className="flex items-center gap-3">
+          {autoOn ? <Zap size={22} className="text-emerald-400" /> : <ZapOff size={22} className="text-zinc-500" />}
+          <div>
+            <p className="font-medium">{autoOn ? "Mode auto-publish ACTIF" : "Mode auto-publish INACTIF"}</p>
+            <p className="text-xs text-zinc-500">
+              {autoOn ? `Le cron tourne et publie jusqu'a ${quota} article(s)/jour automatiquement.`
+                : blockedReason ? `Impossible d'activer : ${blockedReason}.`
+                : "Active pour que la roadmap se genere et se publie toute seule."}
+            </p>
+          </div>
+        </div>
+        <button onClick={toggleAuto} disabled={busy === "auto" || (!autoOn && !!blockedReason)}
+          className={autoOn ? "rounded-lg border border-red-700 bg-red-950/30 px-3 py-2 text-sm text-red-300 disabled:opacity-40" : primaryBtn}>
+          {busy === "auto" ? <Loader2 size={16} className="inline animate-spin" /> : null} {autoOn ? "Desactiver le flow" : "Activer le flow"}
+        </button>
+      </div>
+
+      {quota === 0 && (
+        <p className="rounded-lg border border-amber-900 bg-amber-950/40 p-3 text-sm text-amber-300">
+          Quota a zero : tu peux empiler des mots-cles mais rien ne se generera tant que le quota est a 0. Regle-le dans l'onglet Profil (Articles/jour).
+        </p>
+      )}
+
+      <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
+        <KPI label="Mots-cles en file" value={String(queueSize)} hint={`${pending} pending · ${inProgress} en cours`} />
+        <KPI label="Cadence prevue" value={`${quota} / jour`} hint={`${quota * 30}/mois max`} />
+        <KPI label="Temps pour vider" value={quota > 0 ? `~${Math.ceil(queueSize / quota)} j` : "-"} />
+        <KPI label="Articles generes" value={String(doneCount)} hint="depuis cette roadmap" />
+      </div>
+
+      <div className="grid grid-cols-1 gap-4 lg:grid-cols-2">
+        <div className={cardCls}>
+          <h3 className="mb-2 flex items-center gap-2 font-medium"><Sparkles size={16} /> Ajout simple</h3>
+          <input value={keyword} onChange={(e) => setKeyword(e.target.value)} className={`${inputCls} mb-2`} placeholder="ex: the matcha bienfaits" />
+          <textarea value={brief} onChange={(e) => setBrief(e.target.value)} rows={3} className={`${inputCls} mb-3`} placeholder="Brief (optionnel) : angle, intent, audience cible..." />
+          <button onClick={addSingle} disabled={busy === "single" || keyword.trim().length < 2} className={primaryBtn}>
+            {busy === "single" ? <Loader2 size={16} className="animate-spin" /> : <Plus size={16} />} Ajouter a la roadmap
+          </button>
+        </div>
+
+        <div className={cardCls}>
+          <h3 className="mb-2 flex items-center gap-2 font-medium"><ListPlus size={16} /> Import en masse</h3>
+          <textarea value={raw} onChange={(e) => onRaw(e.target.value)} rows={6} className={`${inputCls} mb-2 font-mono text-xs`} placeholder={"1 mot-cle par ligne\nOU CSV: Priorite,Categorie,Titre,Keyword,Slug"} />
+          {parsed && (
+            <p className="mb-2 text-xs text-zinc-400">
+              {parsed.keywords.length} mots-cles ({parsed.format})
+              {parsed.warnings.length > 0 && <span className="text-amber-400"> · {parsed.warnings.length} avertissement(s)</span>}
+            </p>
+          )}
+          <button onClick={importBulk} disabled={busy === "bulk" || !parsed?.keywords.length} className={primaryBtn}>
+            {busy === "bulk" ? <Loader2 size={16} className="animate-spin" /> : <ListPlus size={16} />} Importer {parsed?.keywords.length ? `(${parsed.keywords.length})` : ""}
+          </button>
+        </div>
+      </div>
+
+      <div>
+        <h3 className="mb-3 font-medium">File ({jobs.length})</h3>
+        <div className="space-y-2">
+          {jobs.length === 0 && <p className="text-sm text-zinc-500">Aucun mot-cle en file.</p>}
+          {jobs.map((job) => (
+            <div key={job.id} className="flex items-center justify-between rounded-lg border border-zinc-800 bg-zinc-900/40 p-3">
+              <div className="min-w-0">
+                <p className="truncate text-sm text-zinc-200">{job.keyword || job.kind}</p>
+                {job.error && <p className="truncate text-xs text-red-400">{job.error}</p>}
+                {job.output?.url && <a href={job.output.url} target="_blank" rel="noreferrer" className="text-xs text-emerald-400">Voir l'article</a>}
               </div>
               <div className="flex items-center gap-3">
                 <Status status={job.status} />
