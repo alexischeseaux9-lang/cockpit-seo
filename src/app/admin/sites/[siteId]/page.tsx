@@ -19,7 +19,11 @@ import {
   Wand2,
   UploadCloud,
   Undo2,
+  BarChart3,
+  Globe,
 } from "lucide-react";
+
+const LANGUAGES = ["francais", "anglais", "allemand", "italien", "espagnol", "neerlandais"];
 
 const PW_KEY = "cockpit_admin_pw";
 
@@ -32,13 +36,14 @@ type Job = {
   output: any;
 };
 
-type TabId = "blog" | "archive" | "profil" | "products" | "categories" | "image" | "history";
+type TabId = "blog" | "archive" | "profil" | "products" | "categories" | "scro" | "image" | "history";
 
 const TABS: { id: TabId; label: string; icon: JSX.Element }[] = [
   { id: "blog", label: "Blog", icon: <FileText size={14} /> },
   { id: "archive", label: "Archive", icon: <FileText size={14} /> },
   { id: "products", label: "Produits", icon: <Package size={14} /> },
   { id: "categories", label: "Categories", icon: <FolderTree size={14} /> },
+  { id: "scro", label: "SCRO", icon: <BarChart3 size={14} /> },
   { id: "profil", label: "Profil", icon: <User size={14} /> },
   { id: "image", label: "Image Lab", icon: <ImageIcon size={14} /> },
   { id: "history", label: "Historique", icon: <History size={14} /> },
@@ -72,11 +77,22 @@ export default function SiteDetail({ params }: { params: { siteId: string } }) {
   const [password, setPassword] = useState("");
   const [tab, setTab] = useState<TabId>("blog");
   const [msg, setMsg] = useState<string | null>(null);
+  const [site, setSite] = useState<any>(null);
 
   useEffect(() => {
     const saved = typeof window !== "undefined" ? localStorage.getItem(PW_KEY) : null;
     if (saved) setPassword(saved);
   }, []);
+
+  const loadSite = useCallback(async () => {
+    if (!password) return;
+    const res = await fetch(`/api/admin/sites/list`, { headers: { authorization: `Bearer ${password}` } });
+    if (res.ok) {
+      const j = await res.json();
+      setSite((j.sites || []).find((s: any) => s.id === siteId) || null);
+    }
+  }, [password, siteId]);
+  useEffect(() => { loadSite(); }, [loadSite]);
 
   const headers = useCallback(
     () => ({ "content-type": "application/json", authorization: `Bearer ${password}` }),
@@ -94,9 +110,24 @@ export default function SiteDetail({ params }: { params: { siteId: string } }) {
   return (
     <main className="min-h-screen bg-zinc-950 px-6 py-8 text-zinc-100">
       <div className="mx-auto max-w-4xl">
-        <Link href="/admin" className="mb-6 flex items-center gap-1.5 text-sm text-zinc-400 hover:text-zinc-100">
+        <Link href="/admin" className="mb-4 flex items-center gap-1.5 text-sm text-zinc-400 hover:text-zinc-100">
           <ArrowLeft size={16} /> Retour
         </Link>
+
+        {site && (
+          <div className="mb-5 flex items-center gap-3">
+            <h1 className="text-xl font-semibold">{site.name}</h1>
+            {site.voice_profile?.content_language ? (
+              <span className="flex items-center gap-1.5 rounded-full border border-emerald-700 bg-emerald-950/40 px-2.5 py-0.5 text-xs capitalize text-emerald-300">
+                <Globe size={12} /> {site.voice_profile.content_language}
+              </span>
+            ) : (
+              <span className="flex items-center gap-1.5 rounded-full border border-amber-700 bg-amber-950/40 px-2.5 py-0.5 text-xs text-amber-300">
+                <Globe size={12} /> Langue non definie, va dans Profil
+              </span>
+            )}
+          </div>
+        )}
 
         <div className="mb-6 flex flex-wrap gap-1 border-b border-zinc-800">
           {TABS.map((t) => (
@@ -118,7 +149,8 @@ export default function SiteDetail({ params }: { params: { siteId: string } }) {
         {password && tab === "archive" && <ArchiveTab siteId={siteId} api={api} />}
         {password && tab === "products" && <ProductsTab siteId={siteId} api={api} setMsg={setMsg} />}
         {password && tab === "categories" && <CategoriesTab siteId={siteId} api={api} setMsg={setMsg} />}
-        {password && tab === "profil" && <ProfilTab siteId={siteId} api={api} setMsg={setMsg} />}
+        {password && tab === "scro" && <ScroTab siteId={siteId} api={api} setMsg={setMsg} />}
+        {password && tab === "profil" && <ProfilTab siteId={siteId} api={api} setMsg={setMsg} onSaved={loadSite} />}
         {password && tab === "image" && <ImageTab api={api} setMsg={setMsg} />}
         {password && tab === "history" && <HistoryTab siteId={siteId} api={api} />}
       </div>
@@ -362,7 +394,70 @@ function CategoriesTab({ siteId, api, setMsg }: { siteId: string; api: ApiFn; se
   );
 }
 
-function ProfilTab({ siteId, api, setMsg }: { siteId: string; api: ApiFn; setMsg: (s: string | null) => void }) {
+function ScroTab({ siteId, api, setMsg }: { siteId: string; api: ApiFn; setMsg: (s: string | null) => void }) {
+  const [rows, setRows] = useState<any[]>([]);
+  const [raw, setRaw] = useState("");
+  const [busy, setBusy] = useState<string | null>(null);
+
+  const load = useCallback(async () => {
+    const { ok, json } = await api(`/api/admin/sites/${siteId}/scro`);
+    if (ok) setRows(json.rows || []);
+  }, [siteId, api]);
+  useEffect(() => { load(); }, [load]);
+
+  async function ingest() {
+    if (!raw.trim()) return;
+    setBusy("ing"); setMsg("Ingestion des donnees Search Console...");
+    const { ok, json } = await api(`/api/admin/sites/${siteId}/scro`, { method: "POST", body: JSON.stringify({ raw }) });
+    setBusy(null); setMsg(ok ? `${json.ingested} requetes ingerees` : `Erreur: ${json.error}`);
+    if (ok) { setRaw(""); load(); }
+  }
+  async function inject(payload: any, label: string) {
+    setBusy(label); setMsg("Mise en file des articles...");
+    const { ok, json } = await api(`/api/admin/sites/${siteId}/scro/enqueue`, { method: "POST", body: JSON.stringify(payload) });
+    setBusy(null); setMsg(ok ? `${json.enqueued} article(s) mis en file` : `Erreur: ${json.error}`);
+    if (ok) load();
+  }
+
+  return (
+    <div className="space-y-5">
+      <div className={cardCls}>
+        <h3 className="mb-1 flex items-center gap-2 font-medium"><BarChart3 size={16} /> Ingestion Search Console</h3>
+        <p className="mb-2 text-xs text-zinc-500">Colle ton export Search Console (colonnes: requete, clics, impressions, position). Un par ligne, separateur tab/virgule/point-virgule.</p>
+        <textarea value={raw} onChange={(e) => setRaw(e.target.value)} rows={5} className={`${inputCls} mb-3 font-mono`} placeholder={"wool work socks\t12\t340\t14.2\nbamboo socks men\t5\t190\t9.8"} />
+        <button onClick={ingest} disabled={busy === "ing" || !raw.trim()} className={primaryBtn}>
+          {busy === "ing" ? <Loader2 size={16} className="animate-spin" /> : <UploadCloud size={16} />} Ingerer
+        </button>
+      </div>
+
+      <div className="flex items-center justify-between">
+        <h3 className="font-medium">Requetes ({rows.length})</h3>
+        <button onClick={() => inject({ min_position: 8, limit: 20 }, "bulk")} disabled={busy === "bulk" || !rows.length} className={ghostBtn}>
+          {busy === "bulk" ? <Loader2 size={12} className="animate-spin" /> : <Plus size={12} />} Injecter (position 8+)
+        </button>
+      </div>
+
+      <div className="space-y-2">
+        {rows.length === 0 && <p className="text-sm text-zinc-500">Aucune donnee. Colle ton export Search Console ci-dessus.</p>}
+        {rows.map((r) => (
+          <div key={r.id} className="flex items-center justify-between rounded-lg border border-zinc-800 bg-zinc-900/40 p-3">
+            <div className="min-w-0">
+              <p className="truncate text-sm text-zinc-200">{r.query}</p>
+              <p className="text-xs text-zinc-500">pos {r.position ?? "?"} · {r.impressions} impr · {r.clicks} clics {r.enqueued ? "· en file" : ""}</p>
+            </div>
+            {!r.enqueued && (
+              <button onClick={() => inject({ ids: [r.id] }, r.id)} disabled={busy === r.id} className={ghostBtn}>
+                {busy === r.id ? <Loader2 size={12} className="animate-spin" /> : <Plus size={12} />} Article
+              </button>
+            )}
+          </div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function ProfilTab({ siteId, api, setMsg, onSaved }: { siteId: string; api: ApiFn; setMsg: (s: string | null) => void; onSaved: () => void }) {
   const [vp, setVp] = useState<Record<string, any>>({});
   const [quota, setQuota] = useState(1);
   const [autoPub, setAutoPub] = useState(true);
@@ -395,12 +490,12 @@ function ProfilTab({ siteId, api, setMsg }: { siteId: string; api: ApiFn; setMsg
     const r2 = await api(`/api/admin/sites/update`, { method: "POST", body: JSON.stringify({ site_id: siteId, daily_post_quota: Number(quota), auto_publish_enabled: autoPub }) });
     setBusy(null);
     setMsg(r1.ok && r2.ok ? "Profil enregistre." : "Erreur a l'enregistrement");
+    if (r1.ok && r2.ok) onSaved();
   }
 
   const fields: [string, string][] = [
     ["tone_description", "Ton editorial"],
     ["audience", "Audience"],
-    ["content_language", "Langue (francais/anglais/...)"],
     ["image_style_hint", "Style des images"],
     ["author_name", "Nom auteur"],
     ["author_role", "Role auteur"],
@@ -420,6 +515,15 @@ function ProfilTab({ siteId, api, setMsg }: { siteId: string; api: ApiFn; setMsg
       </div>
 
       <div className={`${cardCls} space-y-3`}>
+        <div>
+          <label className="mb-1 block text-xs text-zinc-400">Langue du site (verrouillee apres choix)</label>
+          <select value={f("content_language") || ""} onChange={(e) => set("content_language", e.target.value)} className={inputCls}>
+            <option value="">Choisir une langue...</option>
+            {LANGUAGES.map((l) => (
+              <option key={l} value={l} className="capitalize">{l}</option>
+            ))}
+          </select>
+        </div>
         {fields.map(([k, label]) => (
           <div key={k}>
             <label className="mb-1 block text-xs text-zinc-400">{label}</label>

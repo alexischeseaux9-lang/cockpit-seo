@@ -14,6 +14,7 @@ import {
   FileText,
   ChevronRight,
   RefreshCw,
+  Globe,
 } from "lucide-react";
 import { ConnectModal } from "./connect-modal";
 import { VERSION } from "@/lib/version";
@@ -31,6 +32,7 @@ type Site = {
   url: string;
   platform: string;
   connection_status: string;
+  voice_profile?: { content_language?: string };
   health: Health;
 };
 
@@ -201,9 +203,16 @@ export default function AdminPage() {
                   </Link>
                   <p className="text-xs text-zinc-500">{site.url}</p>
                 </div>
-                <span className="rounded border border-zinc-700 px-1.5 py-0.5 text-xs text-zinc-400">
-                  {site.platform}
-                </span>
+                <div className="flex flex-col items-end gap-1">
+                  <span className="rounded border border-zinc-700 px-1.5 py-0.5 text-xs text-zinc-400">
+                    {site.platform}
+                  </span>
+                  {site.voice_profile?.content_language && (
+                    <span className="flex items-center gap-1 rounded border border-emerald-800 px-1.5 py-0.5 text-xs capitalize text-emerald-400">
+                      <Globe size={11} /> {site.voice_profile.content_language}
+                    </span>
+                  )}
+                </div>
               </div>
 
               <div className="mb-4 grid grid-cols-2 gap-2 text-sm">
