@@ -184,7 +184,7 @@ export default function SiteDetail({ params }: { params: { siteId: string } }) {
         {password && tab === "scro" && <ScroTab siteId={siteId} api={api} setMsg={setMsg} />}
         {password && tab === "roadmap" && <RoadmapTab siteId={siteId} site={site} api={api} setMsg={setMsg} onSiteChanged={loadSite} />}
         {password && tab === "profil" && <ProfilTab siteId={siteId} api={api} setMsg={setMsg} onSaved={loadSite} />}
-        {password && tab === "image" && <ImageTab siteId={siteId} api={api} setMsg={setMsg} />}
+        {password && tab === "image" && <ImageTab siteId={siteId} site={site} api={api} setMsg={setMsg} />}
         {password && tab === "optimizations" && <HistoryTab siteId={siteId} api={api} />}
       </div>
     </main>
@@ -1064,56 +1064,115 @@ function ProfilTab({ siteId, api, setMsg, onSaved }: { siteId: string; api: ApiF
   );
 }
 
-function ImageTab({ siteId, api, setMsg }: { siteId: string; api: ApiFn; setMsg: (s: string | null) => void }) {
-  const [prompt, setPrompt] = useState("");
-  const [model, setModel] = useState("fal-ai/flux/dev");
-  const [size, setSize] = useState("landscape_16_9");
-  const [busy, setBusy] = useState(false);
-  const [runs, setRuns] = useState<any[]>([]);
+const IMAGE_PRESETS_UI = [
+  { id: "icon-lineart", label: "Icon line-art", model: "fal-ai/flux/schnell", cost: 0.003, desc: "Icone monoligne fond sombre, glow blanc." },
+  { id: "warm-cosy", label: "Warm cosy", model: "fal-ai/flux/schnell", cost: 0.003, desc: "Photo chaleureuse, lumiere naturelle, terracotta." },
+  { id: "business-editorial", label: "Business editorial", model: "fal-ai/flux/dev", cost: 0.025, desc: "Photo business moderne, sharp focus. B2B." },
+  { id: "photo-real-premium", label: "Photo-real premium 4K", model: "fal-ai/flux-pro/v1.1", cost: 0.04, desc: "Ultra-realiste haut de gamme. Luxe, lifestyle." },
+  { id: "abstract-minimal", label: "Abstract minimal", model: "fal-ai/flux/schnell", cost: 0.003, desc: "Formes geometriques, palettes douces. Tech, SaaS." },
+  { id: "symbolic-icon", label: "Symbolic icon studio", model: "fal-ai/flux/schnell", cost: 0.003, desc: "Un objet centre, lumiere studio. Sobre." },
+  { id: "vibrant-flat", label: "Vibrant flat illustration", model: "fal-ai/flux/dev", cost: 0.025, desc: "Illustration plate, couleurs vives. SaaS." },
+];
 
-  const load = useCallback(async () => {
-    const { ok, json } = await api(`/api/admin/image-lab?site_id=${siteId}`);
-    if (ok) setRuns(json.runs || []);
-  }, [siteId, api]);
-  useEffect(() => { load(); }, [load]);
+function ImageTab({ siteId, site, api, setMsg }: { siteId: string; site: any; api: ApiFn; setMsg: (s: string | null) => void }) {
+  const [topic, setTopic] = useState("");
+  const [customHint, setCustomHint] = useState("");
+  const [customModel, setCustomModel] = useState("fal-ai/flux/dev");
+  const [busy, setBusy] = useState<string | null>(null);
+  const [samples, setSamples] = useState<any[]>([]);
 
-  async function gen() {
-    if (!prompt.trim()) return;
-    setBusy(true); setMsg("Generation de l'image...");
-    const { ok, json } = await api(`/api/admin/image-lab`, { method: "POST", body: JSON.stringify({ site_id: siteId, prompt, model, size }) });
-    setBusy(false);
-    if (ok) { setMsg(null); load(); } else setMsg(`Erreur: ${json.error}`);
+  useEffect(() => { setTopic(`Article ${site?.name || ""}`.trim()); }, [site?.name]);
+  const savedStyle = site?.voice_profile?.image_style_label;
+
+  async function genPreset(presetId: string, label: string) {
+    if (!topic.trim()) { setMsg("Renseigne un sujet sample."); return; }
+    setBusy(presetId); setMsg(`Generation (${label})...`);
+    const { ok, json } = await api(`/api/admin/sites/${siteId}/test-image`, { method: "POST", body: JSON.stringify({ sample_topic: topic, preset_id: presetId }) });
+    setBusy(null);
+    if (ok) { setSamples((s) => [{ ...json, preset_id: presetId }, ...s]); setMsg(null); } else setMsg(`Erreur: ${json.error}`);
   }
+  async function genCustom() {
+    if (customHint.trim().length < 10) return;
+    setBusy("custom"); setMsg("Generation custom...");
+    const { ok, json } = await api(`/api/admin/sites/${siteId}/test-image`, { method: "POST", body: JSON.stringify({ sample_topic: topic, custom_style_hint: customHint, custom_model: customModel, custom_label: "Custom" }) });
+    setBusy(null);
+    if (ok) { setSamples((s) => [{ ...json, custom: true }, ...s]); setMsg(null); } else setMsg(`Erreur: ${json.error}`);
+  }
+  async function saveDefault(sample: any) {
+    setBusy("save" + (sample.preset_id || "custom"));
+    const payload = sample.preset_id ? { preset_id: sample.preset_id } : { custom_style_hint: customHint, custom_model: sample.model, custom_label: sample.label };
+    const { ok, json } = await api(`/api/admin/sites/${siteId}/save-image-style`, { method: "POST", body: JSON.stringify(payload) });
+    setBusy(null); setMsg(ok ? `Style par defaut: ${json.saved.image_style_label}` : `Erreur: ${json.error}`);
+  }
+
+  const totalCost = samples.reduce((a, s) => a + (s.cost_usd || 0), 0);
+
   return (
     <div className="space-y-4">
       <div className={cardCls}>
-        <textarea value={prompt} onChange={(e) => setPrompt(e.target.value)} rows={3} className={`${inputCls} mb-3`} placeholder="A cozy flat-lay of wool socks on a wooden table, natural light" />
-        <div className="mb-3 grid grid-cols-2 gap-2">
-          <select value={model} onChange={(e) => setModel(e.target.value)} className={inputCls}>
-            <option value="fal-ai/flux/dev">flux/dev</option>
-            <option value="fal-ai/flux-pro">flux-pro</option>
-            <option value="fal-ai/flux/schnell">flux/schnell (rapide)</option>
-          </select>
-          <select value={size} onChange={(e) => setSize(e.target.value)} className={inputCls}>
-            <option value="landscape_16_9">landscape 16:9</option>
-            <option value="landscape_4_3">landscape 4:3</option>
-            <option value="square_hd">square HD</option>
-            <option value="portrait_16_9">portrait 16:9</option>
-          </select>
+        <div className="mb-2 flex items-center justify-between">
+          <h3 className="font-medium">Image Lab, onboarding visuel</h3>
+          {savedStyle ? (
+            <span className="flex items-center gap-1 rounded-full bg-emerald-500/15 px-2 py-0.5 text-xs text-emerald-300"><Check size={11} /> Defaut: {savedStyle}</span>
+          ) : (
+            <span className="rounded-full bg-amber-500/10 px-2 py-0.5 text-xs text-amber-300">Aucun style sauvegarde</span>
+          )}
         </div>
-        <button onClick={gen} disabled={busy || !prompt.trim()} className={primaryBtn}>
-          {busy ? <Loader2 size={16} className="animate-spin" /> : <ImageIcon size={16} />} Generer
-        </button>
+        <input value={topic} onChange={(e) => setTopic(e.target.value)} className={inputCls} placeholder="Sujet sample (section H2 fictive)" />
       </div>
-      <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
-        {runs.map((r) => (
-          <div key={r.id} className={cardCls}>
-            <img src={r.public_url} alt="" className="mb-2 w-full rounded" />
-            <p className="line-clamp-1 text-xs text-zinc-500">{r.prompt}</p>
-            <a href={r.public_url} target="_blank" rel="noreferrer" className="flex items-center gap-1 text-xs text-emerald-400">URL <ExternalLink size={11} /></a>
+
+      <div className="grid gap-3 md:grid-cols-2 lg:grid-cols-3">
+        {IMAGE_PRESETS_UI.map((p) => (
+          <div key={p.id} className={cardCls}>
+            <div className="mb-1 flex items-center justify-between">
+              <ImageIcon size={18} className="text-sky-300" />
+              <span className="text-[10px] text-zinc-500">{p.model.split("/").slice(-1)[0]} · ${p.cost}</span>
+            </div>
+            <p className="font-medium text-zinc-100">{p.label}</p>
+            <p className="mb-3 min-h-[34px] text-xs text-zinc-500">{p.desc}</p>
+            <button onClick={() => genPreset(p.id, p.label)} disabled={busy === p.id} className={ghostBtn}>
+              {busy === p.id ? <Loader2 size={12} className="animate-spin" /> : <ImageIcon size={12} />} Generer sample
+            </button>
           </div>
         ))}
       </div>
+
+      <div className={cardCls}>
+        <h3 className="mb-2 font-medium">Style custom</h3>
+        <textarea value={customHint} onChange={(e) => setCustomHint(e.target.value)} rows={2} className={`${inputCls} mb-2`} placeholder="Decris le style (min 10 caracteres)" />
+        <div className="flex gap-2">
+          <select value={customModel} onChange={(e) => setCustomModel(e.target.value)} className={inputCls}>
+            <option value="fal-ai/flux/schnell">flux/schnell ($0.003)</option>
+            <option value="fal-ai/flux/dev">flux/dev ($0.025)</option>
+            <option value="fal-ai/flux-pro/v1.1">flux-pro v1.1 ($0.04)</option>
+            <option value="fal-ai/flux-pro">flux-pro ($0.05)</option>
+          </select>
+          <button onClick={genCustom} disabled={busy === "custom" || customHint.trim().length < 10} className={primaryBtn}>
+            {busy === "custom" ? <Loader2 size={16} className="animate-spin" /> : <ImageIcon size={16} />} Generer custom
+          </button>
+        </div>
+      </div>
+
+      {samples.length > 0 && (
+        <div>
+          <div className="mb-2 flex items-center justify-between">
+            <h3 className="font-medium">Samples generes ({samples.length})</h3>
+            <span className="text-xs text-emerald-300">Cout total: ${totalCost.toFixed(3)}</span>
+          </div>
+          <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
+            {samples.map((s, i) => (
+              <div key={i} className={cardCls}>
+                <img src={s.url} alt="" className="mb-2 aspect-video w-full rounded object-cover" />
+                <p className="text-xs text-zinc-300">{s.label}</p>
+                <p className="mb-2 text-[10px] text-zinc-500">{s.model} · ${s.cost_usd}</p>
+                <button onClick={() => saveDefault(s)} disabled={busy === "save" + (s.preset_id || "custom")} className="w-full rounded-lg bg-emerald-500/15 px-3 py-1.5 text-xs text-emerald-300 hover:bg-emerald-500/25">
+                  Sauver comme defaut
+                </button>
+              </div>
+            ))}
+          </div>
+        </div>
+      )}
     </div>
   );
 }
