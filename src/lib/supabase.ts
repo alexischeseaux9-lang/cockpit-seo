@@ -10,6 +10,11 @@ export function getServiceClient(): SupabaseClient {
   }
   return createClient(url, serviceKey, {
     auth: { persistSession: false, autoRefreshToken: false },
+    global: {
+      // Next.js met en cache global.fetch par defaut. On force no-store pour
+      // que les lectures Supabase soient toujours fraiches.
+      fetch: (input, init) => fetch(input, { ...init, cache: "no-store" }),
+    },
   });
 }
 
