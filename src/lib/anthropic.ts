@@ -385,25 +385,33 @@ Reponds UNIQUEMENT en JSON STRICT:
   return o;
 }
 
-// M5: optimisation d'une collection / categorie.
+// M5/V3: optimisation complete d'une collection (SERP + intent + FAQ + schema).
 export type CollectionAnalysis = {
   quality_score: number;
   intent_class: string;
+  suggested_h1: string;
   suggested_description_html: string;
   suggested_meta_title: string;
   suggested_meta_description: string;
+  suggested_faq: { q: string; a: string }[];
+  suggested_internal_links: { anchor: string; url: string }[];
+  suggested_schema: any;
 };
 
 export async function analyzeCollection(
   name: string,
   currentDescription: string,
-  voiceProfile: Record<string, any>
+  voiceProfile: Record<string, any>,
+  serp?: SerpAnalysis
 ): Promise<CollectionAnalysis> {
   const c = client();
   const lang = voiceProfile.content_language || "francais";
+  const serpBlock = serp
+    ? `\nConcurrents SERP:\n${serp.organic.slice(0, 6).map((o, i) => `${i + 1}. ${o.title}`).join("\n")}\nQuestions: ${serp.questions.slice(0, 6).join(" | ")}`
+    : "";
   const msg = await c.messages.create({
     model: SONNET,
-    max_tokens: 2500,
+    max_tokens: 4000,
     system: `Tu es un expert SEO e-commerce. Tu ecris en ${lang}. ${STYLE_RULES}`,
     messages: [
       {
@@ -411,24 +419,30 @@ export async function analyzeCollection(
         content: `Optimise cette page collection pour le SEO et la conversion.
 
 Nom: ${name}
-Description actuelle: ${currentDescription.slice(0, 2000) || "(vide)"}
+Description actuelle: ${currentDescription.slice(0, 2000) || "(vide)"}${serpBlock}
 
 Reponds UNIQUEMENT en JSON:
 {
   "quality_score": <0-100>,
   "intent_class": "commercial|informational|hybrid|navigational",
-  "suggested_description_html": "<description HTML riche et optimisee>",
+  "suggested_h1": "H1 optimise",
+  "suggested_description_html": "<description HTML riche, H2/H3, optimisee>",
   "suggested_meta_title": "< 60 caracteres",
-  "suggested_meta_description": "< 155 caracteres"
+  "suggested_meta_description": "< 155 caracteres",
+  "suggested_faq": [{"q":"question","a":"reponse"}],
+  "suggested_internal_links": [{"anchor":"texte","url":"/collections/..."}],
+  "suggested_schema": {"@context":"https://schema.org","@type":"CollectionPage"}
 }`,
       },
     ],
   });
+  await logAnthropicUsage({ model: SONNET, usage: (msg as any).usage, context: "collection_analyze" });
   const text = msg.content.map((b) => (b.type === "text" ? b.text : "")).join("");
   const a = extractJson(text) as CollectionAnalysis;
-  a.suggested_description_html = stripEmDashes(a.suggested_description_html);
-  a.suggested_meta_title = stripEmDashes(a.suggested_meta_title);
-  a.suggested_meta_description = stripEmDashes(a.suggested_meta_description);
+  a.suggested_description_html = stripEmDashes(a.suggested_description_html || "");
+  a.suggested_meta_title = stripEmDashes(a.suggested_meta_title || "");
+  a.suggested_meta_description = stripEmDashes(a.suggested_meta_description || "");
+  a.suggested_h1 = stripEmDashes(a.suggested_h1 || "");
   return a;
 }
 

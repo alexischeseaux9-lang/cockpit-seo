@@ -31,6 +31,7 @@ import {
   ListPlus,
   Check,
   Trash2,
+  ChevronRight,
 } from "lucide-react";
 import { parseKeywordInput, type ParseResult } from "@/lib/sites/csv-parser";
 
@@ -704,67 +705,135 @@ function ProductDrawer({ siteId, api, product, pw, onClose }: { siteId: string; 
   );
 }
 
+const TAX_DIMS: [string, string, number][] = [
+  ["description", "Description", 30], ["meta_title", "Meta title", 15], ["meta_description", "Meta desc", 15],
+  ["image", "Image", 10], ["products_count", "Produits", 10], ["internal_links", "Liens int.", 10], ["headings_structure", "Headings", 10],
+];
+
 function CategoriesTab({ siteId, api, setMsg }: { siteId: string; api: ApiFn; setMsg: (s: string | null) => void }) {
   const [taxos, setTaxos] = useState<any[]>([]);
   const [busy, setBusy] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
+  const [sort, setSort] = useState("score-asc");
+  const [expanded, setExpanded] = useState<string | null>(null);
+  const [histFor, setHistFor] = useState<any>(null);
 
   const load = useCallback(async () => {
     setLoading(true);
     const { ok, json } = await api(`/api/admin/sites/${siteId}/taxonomies`);
     setLoading(false);
-    if (ok) setTaxos(json.taxonomies || []); else setMsg(json.error || "Erreur");
+    if (ok) setTaxos(json.rows || []); else setMsg(json.error || "Erreur");
   }, [siteId, api, setMsg]);
   useEffect(() => { load(); }, [load]);
 
-  const [histFor, setHistFor] = useState<any>(null);
-
+  async function sync() {
+    setBusy("sync"); setMsg("Sync + audit 7 dimensions...");
+    const { ok, json } = await api(`/api/admin/sites/${siteId}/taxonomies/sync`, { method: "POST", body: JSON.stringify({}) });
+    setBusy(null); setMsg(ok ? `${json.fetched} categories, score moyen ${json.summary.avg}` : `Erreur: ${json.error}`); load();
+  }
   async function analyze(id: string) {
-    setBusy(id + "a"); setMsg("Analyse IA en cours...");
+    setBusy(id + "a"); setMsg("Analyse IA (SERP + FAQ + schema)...");
     const { ok, json } = await api(`/api/admin/sites/${siteId}/taxonomies/analyze`, { method: "POST", body: JSON.stringify({ tax_id: id }) });
     setBusy(null); setMsg(ok ? "Version optimisee prete." : `Erreur: ${json.error}`); load();
   }
   async function genImage(id: string) {
-    setBusy(id + "i"); setMsg("Generation de l'image de collection (fal)...");
+    setBusy(id + "i"); setMsg("Generation image collection (fal)...");
     const { ok, json } = await api(`/api/admin/sites/${siteId}/taxonomies/image`, { method: "POST", body: JSON.stringify({ tax_id: id }) });
     setBusy(null); setMsg(ok ? "Image generee et poussee." : `Erreur: ${json.error}`); load();
   }
   async function push(id: string) {
     setBusy(id + "p"); setMsg("Push sur Shopify...");
     const { ok, json } = await api(`/api/admin/sites/${siteId}/taxonomies/push`, { method: "POST", body: JSON.stringify({ tax_id: id }) });
-    setBusy(null); setMsg(ok ? "Collection mise a jour." : `Erreur: ${json.error}`); load();
+    setBusy(null); setMsg(ok ? "Collection poussee en live." : `Erreur: ${json.error}`); load();
   }
 
-  if (loading) return <p className="text-sm text-zinc-400"><Loader2 size={14} className="inline animate-spin" /> Synchronisation des collections...</p>;
+  const scored = taxos.filter((t) => t.quality_score != null);
+  const avg = scored.length ? Math.round(scored.reduce((a, t) => a + t.quality_score, 0) / scored.length) : 0;
+  const sorted = [...taxos].sort((a, b) => {
+    if (sort === "score-asc") return (a.quality_score ?? 999) - (b.quality_score ?? 999);
+    if (sort === "score-desc") return (b.quality_score ?? -1) - (a.quality_score ?? -1);
+    if (sort === "name-asc") return a.name.localeCompare(b.name);
+    return (b.products_count || 0) - (a.products_count || 0);
+  });
+  const scoreColor = (s: number | null) => s == null ? "text-zinc-500" : s >= 80 ? "text-emerald-400" : s >= 40 ? "text-amber-400" : "text-red-400";
+
+  if (loading) return <p className="text-sm text-zinc-400"><Loader2 size={14} className="inline animate-spin" /> Chargement...</p>;
+
   return (
-    <div className="space-y-2">
-      {taxos.length === 0 && <p className="text-sm text-zinc-500">Aucune collection.</p>}
-      {taxos.map((t) => (
-        <div key={t.id} className="flex items-center justify-between rounded-lg border border-zinc-800 bg-zinc-900/40 p-3">
-          <div className="min-w-0">
-            <p className="truncate text-sm text-zinc-200">{t.name}</p>
-            <div className="flex items-center gap-2 text-xs text-zinc-500">
-              {t.quality_score != null && <span>score {t.quality_score}</span>}
-              {t.intent_class && <span>{t.intent_class}</span>}
-              {t.push_status === "pushed" && <span className="text-emerald-400">pousse</span>}
-            </div>
-          </div>
-          <div className="flex items-center gap-2">
-            <button onClick={() => setHistFor(t)} className={ghostBtn}><History size={12} /> Historique</button>
-            <button onClick={() => genImage(t.id)} disabled={busy === t.id + "i"} className={ghostBtn} title="Toujours actif">
-              {busy === t.id + "i" ? <Loader2 size={12} className="animate-spin" /> : <ImageIcon size={12} />} {t.suggested_image_url ? "Re-generer image" : "Image"}
-            </button>
-            <button onClick={() => analyze(t.id)} disabled={busy === t.id + "a"} className={ghostBtn}>
-              {busy === t.id + "a" ? <Loader2 size={12} className="animate-spin" /> : <Wand2 size={12} />} Analyser
-            </button>
-            {t.suggested_description_html && (
-              <button onClick={() => push(t.id)} disabled={busy === t.id + "p"} className={ghostBtn}>
-                {busy === t.id + "p" ? <Loader2 size={12} className="animate-spin" /> : <UploadCloud size={12} />} Pousser
+    <div className="space-y-4">
+      <div className="flex items-center justify-between">
+        <p className="text-xs text-zinc-500">Audit SEO par categorie. Score 0-100 sur 7 dimensions.</p>
+        <button onClick={sync} disabled={busy === "sync"} className={primaryBtn}>
+          {busy === "sync" ? <Loader2 size={14} className="animate-spin" /> : <UploadCloud size={14} />} Sync + audit
+        </button>
+      </div>
+
+      <div className="grid grid-cols-2 gap-2 md:grid-cols-5">
+        {[["Total", taxos.length], ["Score moyen", avg], ["Excellentes", scored.filter((t) => t.quality_score >= 80).length], ["Moyennes", scored.filter((t) => t.quality_score >= 40 && t.quality_score < 80).length], ["Critiques", scored.filter((t) => t.quality_score < 40).length]].map(([l, v]) => (
+          <div key={l} className={`${cardCls} text-center`}><div className="text-xl font-semibold text-zinc-100">{v}</div><div className="text-[10px] uppercase text-zinc-500">{l}</div></div>
+        ))}
+      </div>
+
+      <div className="flex justify-end">
+        <select value={sort} onChange={(e) => setSort(e.target.value)} className={`${inputCls} w-auto`}>
+          <option value="score-asc">Score (pire -&gt; meilleur)</option>
+          <option value="score-desc">Score (meilleur -&gt; pire)</option>
+          <option value="name-asc">Nom (A-Z)</option>
+          <option value="products-desc">Plus de produits</option>
+        </select>
+      </div>
+
+      {sorted.length === 0 && <p className="text-sm text-zinc-500">Aucune categorie. Clique Sync + audit.</p>}
+      <div className="space-y-2">
+        {sorted.map((t) => {
+          const bd = t.quality_breakdown;
+          const open = expanded === t.id;
+          return (
+            <div key={t.id} className="rounded-lg border border-zinc-800 bg-zinc-900/40">
+              <button onClick={() => setExpanded(open ? null : t.id)} className="flex w-full items-center gap-3 p-3 text-left">
+                <span className={`text-lg font-bold ${scoreColor(t.quality_score)}`}>{t.quality_score ?? "-"}</span>
+                <span className="min-w-0 flex-1"><span className="block truncate text-sm text-zinc-200">{t.name}</span><span className="text-xs text-zinc-500">/{t.handle} · {t.products_count} produits</span></span>
+                {open ? <ChevronRight size={16} className="rotate-90 text-zinc-500" /> : <ChevronRight size={16} className="text-zinc-500" />}
               </button>
-            )}
-          </div>
-        </div>
-      ))}
+              {open && (
+                <div className="border-t border-zinc-800 p-3">
+                  {bd && (
+                    <div className="mb-3 space-y-1">
+                      {TAX_DIMS.map(([k, label, max]) => (
+                        <div key={k} className="flex items-center gap-2 text-xs">
+                          <span className="w-24 text-zinc-500">{label}</span>
+                          <div className="h-1.5 flex-1 rounded bg-zinc-800"><div className="h-1.5 rounded bg-emerald-500" style={{ width: `${((bd[k] || 0) / max) * 100}%` }} /></div>
+                          <span className="w-10 text-right text-zinc-500">{bd[k] ?? 0}/{max}</span>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                  {bd?.notes?.length > 0 && (
+                    <div className="mb-3 space-y-0.5">
+                      {bd.notes.map((n: string, i: number) => <p key={i} className="text-xs text-amber-300">{n}</p>)}
+                    </div>
+                  )}
+                  <div className="flex flex-wrap items-center gap-2">
+                    <button onClick={() => setHistFor(t)} className={ghostBtn}><History size={12} /> Historique</button>
+                    <button onClick={() => genImage(t.id)} disabled={busy === t.id + "i"} className={ghostBtn}>
+                      {busy === t.id + "i" ? <Loader2 size={12} className="animate-spin" /> : <ImageIcon size={12} />} {t.current_image_url ? "Re-generer image" : "Generer image"}
+                    </button>
+                    {t.analyzed_at && t.url && <a href={t.url} target="_blank" rel="noreferrer" className={ghostBtn}><ExternalLink size={12} /> Voir l&apos;optimisee</a>}
+                    <button onClick={() => analyze(t.id)} disabled={busy === t.id + "a"} className={ghostBtn}>
+                      {busy === t.id + "a" ? <Loader2 size={12} className="animate-spin" /> : <Sparkles size={12} />} {t.analyzed_at ? "Re-generer" : "Generer version optimisee"}
+                    </button>
+                    {t.suggested_description_html && (
+                      <button onClick={() => push(t.id)} disabled={busy === t.id + "p"} className={primaryBtn}>
+                        {busy === t.id + "p" ? <Loader2 size={12} className="animate-spin" /> : <UploadCloud size={12} />} Pousser
+                      </button>
+                    )}
+                  </div>
+                </div>
+              )}
+            </div>
+          );
+        })}
+      </div>
       {histFor && <HistoryDrawer siteId={siteId} api={api} tax={histFor} onClose={() => setHistFor(null)} />}
     </div>
   );

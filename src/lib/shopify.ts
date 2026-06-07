@@ -183,23 +183,46 @@ export type ShopifyCollection = {
   handle: string;
   body_html: string;
   kind: "custom" | "smart";
+  image_url: string | null;
 };
 
 export async function listCollections(shop: string, token: string): Promise<ShopifyCollection[]> {
   const [custom, smart] = await Promise.all([
-    fetch(`${apiBase(shop)}/custom_collections.json?limit=100`, { headers: { "X-Shopify-Access-Token": token }, cache: "no-store" }),
-    fetch(`${apiBase(shop)}/smart_collections.json?limit=100`, { headers: { "X-Shopify-Access-Token": token }, cache: "no-store" }),
+    fetch(`${apiBase(shop)}/custom_collections.json?limit=250`, { headers: { "X-Shopify-Access-Token": token }, cache: "no-store" }),
+    fetch(`${apiBase(shop)}/smart_collections.json?limit=250`, { headers: { "X-Shopify-Access-Token": token }, cache: "no-store" }),
   ]);
   const out: ShopifyCollection[] = [];
   if (custom.ok) {
     const d = await custom.json();
-    for (const c of d.custom_collections || []) out.push({ id: c.id, title: c.title, handle: c.handle, body_html: c.body_html || "", kind: "custom" });
+    for (const c of d.custom_collections || []) out.push({ id: c.id, title: c.title, handle: c.handle, body_html: c.body_html || "", kind: "custom", image_url: c.image?.src || null });
   }
   if (smart.ok) {
     const d = await smart.json();
-    for (const c of d.smart_collections || []) out.push({ id: c.id, title: c.title, handle: c.handle, body_html: c.body_html || "", kind: "smart" });
+    for (const c of d.smart_collections || []) out.push({ id: c.id, title: c.title, handle: c.handle, body_html: c.body_html || "", kind: "smart", image_url: c.image?.src || null });
   }
   return out;
+}
+
+export async function getCollectionMeta(shop: string, token: string, id: string | number): Promise<{ title_tag: string | null; description_tag: string | null }> {
+  try {
+    const res = await fetch(`${apiBase(shop)}/collections/${id}/metafields.json`, { headers: { "X-Shopify-Access-Token": token }, cache: "no-store" });
+    if (!res.ok) return { title_tag: null, description_tag: null };
+    const mf = (await res.json()).metafields || [];
+    const find = (k: string) => mf.find((m: any) => m.namespace === "global" && m.key === k)?.value || null;
+    return { title_tag: find("title_tag"), description_tag: find("description_tag") };
+  } catch {
+    return { title_tag: null, description_tag: null };
+  }
+}
+
+export async function getCollectionProductCount(shop: string, token: string, id: string | number): Promise<number> {
+  try {
+    const res = await fetch(`${apiBase(shop)}/products/count.json?collection_id=${id}`, { headers: { "X-Shopify-Access-Token": token }, cache: "no-store" });
+    if (!res.ok) return 0;
+    return (await res.json()).count || 0;
+  } catch {
+    return 0;
+  }
 }
 
 export async function updateCollection(

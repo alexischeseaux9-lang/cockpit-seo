@@ -3,6 +3,7 @@ import { z } from "zod";
 import { isAdmin, unauthorized } from "@/lib/auth";
 import { getSiteContext, logChange } from "@/lib/site-context";
 import { analyzeCollection } from "@/lib/anthropic";
+import { analyzeSerp } from "@/lib/serp";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -26,16 +27,26 @@ export async function POST(req: NextRequest, { params }: { params: { siteId: str
       .single();
     if (!tax) return NextResponse.json({ error: "taxonomy_not_found" }, { status: 404 });
 
-    const analysis = await analyzeCollection(tax.name, tax.current_description || "", voice);
+    // SERP best-effort pour nourrir l'analyse
+    const lang = voice.content_language || "francais";
+    let serp;
+    try { serp = await analyzeSerp(tax.name, lang === "francais" ? "fr" : "us", lang === "francais" ? "fr" : "en"); } catch { serp = undefined; }
+
+    const analysis = await analyzeCollection(tax.name, tax.current_description || "", voice, serp);
     const now = new Date().toISOString();
     const { data, error } = await supabase
       .from("site_taxonomies")
       .update({
         intent_class: analysis.intent_class,
         quality_score: analysis.quality_score,
+        serp_analysis: serp || null,
+        suggested_h1: analysis.suggested_h1,
         suggested_description_html: analysis.suggested_description_html,
         suggested_meta_title: analysis.suggested_meta_title,
         suggested_meta_description: analysis.suggested_meta_description,
+        suggested_faq: analysis.suggested_faq || [],
+        suggested_internal_links: analysis.suggested_internal_links || [],
+        suggested_schema: analysis.suggested_schema || null,
         analyzed_at: now,
         updated_at: now,
       })
