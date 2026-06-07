@@ -1,5 +1,8 @@
 # CLAUDE.md — Regles ABSOLUES du projet (Solo SEO Cockpit)
 
+> Reprise de projet ? Lis `docs/HANDOFF.md` (etat V3 complet + toutes les cles, local/gitignore)
+> et `docs/MASTERPROMPT.md`. Dev local: `set -a; . ./.env.local; set +a` avant `npm run dev`.
+
 Ces regles s'appliquent a TOUT commit futur. Elles sont reprises verbatim de la section 2 du master prompt (docs/MASTERPROMPT.md).
 
 1. **JAMAIS d'em-dash ni d'en-dash** nulle part : code, commentaires, copy UI, commits, MDX. Remplacer par point, virgule, parentheses, deux-points. C'est un tell IA visible et une regle dure du projet.

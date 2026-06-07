@@ -37,3 +37,6 @@ next-env.d.ts
 
 # Guide perso avec secrets, jamais commit
 docs/GUIDE-COMPLET.md
+
+# Passation perso avec secrets
+docs/HANDOFF.md
