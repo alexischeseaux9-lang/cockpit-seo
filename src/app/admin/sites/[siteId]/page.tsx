@@ -10,6 +10,7 @@ import {
   ChevronDown, AlertCircle, AlertTriangle, Clock, Hourglass, Search, Power,
   Palette, Coffee, Briefcase, Camera, Shapes, Target, Brush, BookOpen, Users,
   Crown, Network, Gift, ShieldCheck, ShieldOff, PlugZap, Unplug, CalendarDays,
+  Link2, Settings,
 } from "lucide-react";
 import { parseKeywordInput, type ParseResult } from "@/lib/sites/csv-parser";
 import { ConnectModal } from "../../connect-modal";
@@ -866,6 +867,14 @@ const FRESHNESS_META: Record<string, { dot: string; label: string; color: string
   never: { dot: "bg-zinc-500", label: "Jamais", color: "text-zinc-400" },
 };
 
+const ARCHIVE_FILTER_ACTIVE: Record<string, string> = {
+  default: "bg-white text-black",
+  success: "bg-emerald-500/20 text-emerald-200 ring-1 ring-inset ring-emerald-500/40",
+  warn: "bg-amber-500/20 text-amber-200 ring-1 ring-inset ring-amber-500/40",
+  danger: "bg-red-500/20 text-red-200 ring-1 ring-inset ring-red-500/40",
+  info: "bg-sky-500/20 text-sky-200 ring-1 ring-inset ring-sky-500/40",
+};
+
 function ArchiveTab({ siteId, api, setMsg }: { siteId: string; api: ApiFn; setMsg: (s: string | null) => void }) {
   const [data, setData] = useState<any>(null);
   const [loading, setLoading] = useState(true);
@@ -880,6 +889,13 @@ function ArchiveTab({ siteId, api, setMsg }: { siteId: string; api: ApiFn; setMs
     if (ok) setData(json); else setMsg(json.error || "Erreur");
   }, [siteId, api, setMsg]);
   useEffect(() => { load(); }, [load]);
+
+  const running = data?.stats?.running ?? 0;
+  useEffect(() => {
+    if (running <= 0) return;
+    const id = setInterval(load, 30000);
+    return () => clearInterval(id);
+  }, [running, load]);
 
   async function setCadence(n: number) {
     setBusy("cad");
@@ -901,88 +917,149 @@ function ArchiveTab({ siteId, api, setMsg }: { siteId: string; api: ApiFn; setMs
     setBusy(null); setMsg("Bulk termine."); load();
   }
 
-  if (loading) return <p className="text-sm text-zinc-400"><Loader2 size={14} className="inline animate-spin" /> Lecture du catalogue...</p>;
-  if (!data) return <p className="text-sm text-zinc-500">Aucune donnee.</p>;
+  if (loading) return <Spinner label="Lecture du catalogue..." />;
+  if (!data) return <EmptyState>Aucune donnee.</EmptyState>;
 
   const s = data.stats;
-  const stats: [string, number][] = [["Total", s.total], ["A jour", s.fresh], ["Vieillissant", s.aging], ["Perimes", s.stale], ["En cours", s.running], ["En file", s.queued]];
-  const filters: [string, number][] = [["all", s.total], ["fresh", s.fresh], ["aging", s.aging], ["stale", s.stale]];
-  const shown = (data.articles || []).filter((a: any) => filter === "all" || a.freshness === filter);
+  const quota = data.site?.daily_update_quota ?? 0;
+  const yavokCount = (data.articles || []).filter((a: any) => a.has_yavok_blocks).length;
+  const statCards: { label: string; value: number; hint?: string; tone: Tone }[] = [
+    { label: "Total catalogue", value: s.total, hint: `${yavokCount} regeneres`, tone: "default" },
+    { label: "A jour", value: s.fresh, hint: "90 jours ou moins", tone: "success" },
+    { label: "Vieillissant", value: s.aging, hint: "90 a 180 jours", tone: s.aging > 0 ? "warn" : "default" },
+    { label: "Perimes", value: s.stale, hint: "plus de 180 jours", tone: s.stale > 0 ? "danger" : "default" },
+    { label: "En cours", value: s.running, hint: "traites actuellement", tone: s.running > 0 ? "info" : "default" },
+    { label: "En file", value: s.queued, hint: "prets pour le cron", tone: "default" },
+  ];
+  const filters: { f: string; label: string; n: number; tone: keyof typeof ARCHIVE_FILTER_ACTIVE; show: boolean }[] = [
+    { f: "all", label: "Tous", n: s.total, tone: "default", show: true },
+    { f: "fresh", label: "A jour", n: s.fresh, tone: "success", show: true },
+    { f: "aging", label: "Vieillissant", n: s.aging, tone: "warn", show: true },
+    { f: "stale", label: "Perimes", n: s.stale, tone: "danger", show: true },
+    { f: "running", label: "En cours", n: s.running, tone: "info", show: s.running > 0 },
+    { f: "queued", label: "En file", n: s.queued, tone: "default", show: s.queued > 0 },
+  ];
+  const shown = (data.articles || []).filter((a: any) =>
+    filter === "all" ? true : filter === "running" ? a.last_job?.status === "running" : filter === "queued" ? a.last_job?.status === "queued" : a.freshness === filter,
+  );
+  const stalestQueueable = (data.articles || []).filter((a: any) => a.freshness === "stale").length;
 
   return (
     <div className="space-y-5">
-      <div className="grid grid-cols-3 gap-2 md:grid-cols-6">
-        {stats.map(([label, val]) => (
-          <div key={label} className={`${cardCls} text-center`}><div className="text-xl font-semibold text-zinc-100">{val}</div><div className="text-[10px] uppercase text-zinc-500">{label}</div></div>
-        ))}
+      <div className="grid grid-cols-2 gap-3 md:grid-cols-6">
+        {statCards.map((c) => <StatCard key={c.label} label={c.label} value={c.value} hint={c.hint} tone={c.tone} />)}
       </div>
 
-      <div className={cardCls}>
-        <h3 className="mb-1 font-medium">Cadence auto-refresh</h3>
-        <p className="mb-3 text-xs text-zinc-500">Nombre d'articles perimes que le cron regenere chaque jour. 0 = manuel uniquement.</p>
+      <div className="card-base">
+        <h3 className="flex items-center gap-2 text-sm font-semibold text-zinc-100"><Power size={15} className="text-emerald-300" /> Cadence auto-refresh</h3>
+        <p className="mb-3 mt-1 text-xs text-zinc-500">Nombre d&apos;articles perimes que le cron regenere chaque jour. 0 = manuel uniquement.</p>
         <div className="flex gap-2">
           {[0, 1, 3, 6].map((n) => (
             <button key={n} onClick={() => setCadence(n)} disabled={busy === "cad"}
-              className={`rounded-lg border px-3 py-1.5 text-sm ${data.site.daily_update_quota === n ? "border-emerald-600 bg-emerald-950/30 text-emerald-300" : "border-zinc-700 text-zinc-400"}`}>
+              className={cn("rounded-lg px-3.5 py-1.5 text-sm font-medium transition", quota === n ? "bg-white text-black" : "border border-white/10 text-zinc-400 hover:border-white/25")}>
               {n === 0 ? "Off" : `${n}/jour`}
             </button>
           ))}
         </div>
+        {quota > 0 && s.stale > 0 && (
+          <p className="mt-3 text-xs text-zinc-500">
+            Prochain refresh auto : demain matin via le cron Vercel. A cette cadence, les {s.stale} articles perimes seront tous regeneres en ~{Math.ceil(s.stale / quota)} jours.
+          </p>
+        )}
       </div>
 
-      {s.stale > 0 && (
-        <div className={`${cardCls} flex flex-wrap items-center gap-3`}>
-          <span className="text-sm text-zinc-300">{s.stale} articles perimes regenerables</span>
-          <div className="flex gap-1">
-            {[3, 6, 10].map((n) => (
-              <button key={n} onClick={() => setBulkN(n)} className={`rounded px-2 py-1 text-xs ${bulkN === n ? "bg-white text-black" : "border border-zinc-700 text-zinc-400"}`}>{n}</button>
-            ))}
+      {stalestQueueable > 0 && (
+        <div className="card-base flex flex-wrap items-center gap-3">
+          <span className="text-sm text-zinc-300">{stalestQueueable} articles perimes peuvent etre regeneres tout de suite</span>
+          <div className="ml-auto flex items-center gap-2">
+            <div className="flex gap-1">
+              {[3, 6, 10].map((n) => (
+                <button key={n} onClick={() => setBulkN(n)} className={cn("h-7 w-8 rounded-md text-xs font-semibold transition", bulkN === n ? "bg-white text-black" : "border border-white/10 text-zinc-400 hover:border-white/25")}>{n}</button>
+              ))}
+            </div>
+            <button onClick={bulkRun} disabled={busy === "bulk"} className="btn-primary btn-sm">
+              {busy === "bulk" ? <Loader2 size={13} className="animate-spin" /> : <Play size={13} />} Lancer {bulkN} maintenant
+            </button>
           </div>
-          <button onClick={bulkRun} disabled={busy === "bulk"} className={primaryBtn}>
-            {busy === "bulk" ? <Loader2 size={14} className="animate-spin" /> : <Play size={14} />} Lancer {bulkN} maintenant
-          </button>
         </div>
       )}
 
-      <div className="flex items-center gap-2">
-        {filters.map(([f, n]) => (
-          <button key={f} onClick={() => setFilter(f)} className={`rounded-full border px-2.5 py-1 text-xs ${filter === f ? "border-emerald-600 text-emerald-300" : "border-zinc-700 text-zinc-400"}`}>
-            {f === "all" ? "Tous" : FRESHNESS_META[f].label} ({n})
+      <div className="flex flex-wrap items-center gap-1.5">
+        {filters.filter((x) => x.show).map((x) => (
+          <button key={x.f} onClick={() => setFilter(x.f)}
+            className={cn("inline-flex items-center gap-1.5 rounded-full px-3 py-1 text-xs font-medium transition", filter === x.f ? ARCHIVE_FILTER_ACTIVE[x.tone] : "border border-white/10 text-zinc-400 hover:text-zinc-200")}>
+            {x.label} <span className="opacity-70">{x.n}</span>
           </button>
         ))}
-        <button onClick={load} className={`${ghostBtn} ml-auto`}><RefreshCwTab /> Rafraichir</button>
+        <button onClick={load} className="btn-icon ml-auto h-8 w-8" aria-label="Rafraichir"><RefreshCw size={14} /></button>
       </div>
 
-      <div className="space-y-2">
+      <div className="card-base divide-y divide-white/[0.06] p-0">
+        {shown.length === 0 && <div className="px-4 py-6 text-center text-sm text-zinc-500">Aucun article dans ce filtre.</div>}
         {shown.slice(0, 200).map((a: any) => {
           const fm = FRESHNESS_META[a.freshness] || FRESHNESS_META.never;
+          const lj = a.last_job;
           return (
-            <div key={a.id} className="flex items-center justify-between rounded-lg border border-zinc-800 bg-zinc-900/40 p-3">
+            <div key={a.id} className="flex items-center justify-between gap-3 px-4 py-3">
               <div className="flex min-w-0 items-center gap-3">
                 <span className={`h-2 w-2 shrink-0 rounded-full ${fm.dot}`} />
                 <div className="min-w-0">
-                  <a href={a.url} target="_blank" rel="noreferrer" className="truncate text-sm text-zinc-200 hover:text-emerald-400">{a.title}</a>
-                  <p className={`text-xs ${fm.color}`}>{fm.label} · {a.days_since_update}j {a.last_job?.status === "running" ? "· regen en cours" : ""}</p>
+                  <div className="flex flex-wrap items-center gap-2">
+                    <a href={a.url} target="_blank" rel="noreferrer" className="truncate text-sm text-zinc-200 hover:text-emerald-400">{a.title}</a>
+                    {a.blog_title && <span className="rounded bg-white/[0.06] px-1.5 py-0.5 text-[10px] text-zinc-500">{a.blog_title}</span>}
+                    {a.has_yavok_blocks && <span className="rounded bg-emerald-500/10 px-1.5 py-0.5 text-[10px] text-emerald-300">Optimise</span>}
+                  </div>
+                  <p className={cn("mt-0.5 text-xs", fm.color)}>
+                    {fm.label} · {a.days_since_update}j depuis derniere update
+                    {lj?.status === "running" && <span className="ml-1 inline-flex items-center gap-1 text-amber-300"><Loader2 size={10} className="animate-spin" /> regeneration en cours</span>}
+                    {lj?.status === "queued" && <span className="ml-1 inline-flex items-center gap-1 text-zinc-400"><Clock size={10} /> en file</span>}
+                    {lj?.status === "error" && <span className="ml-1 text-red-400">{String(lj.error || "erreur").slice(0, 80)}</span>}
+                  </p>
                 </div>
               </div>
-              <button onClick={() => refreshOne(a)} disabled={busy === a.id} className={ghostBtn}>
-                {busy === a.id ? <Loader2 size={12} className="animate-spin" /> : <Play size={12} />} Regenerer
+              <button onClick={() => refreshOne(a)} disabled={busy === a.id} className="btn-ghost btn-sm shrink-0">
+                {busy === a.id ? <Loader2 size={12} className="animate-spin" /> : <RefreshCw size={12} />} Regenerer
               </button>
             </div>
           );
         })}
+        {shown.length > 200 && <div className="px-4 py-3 text-center text-xs text-zinc-600">Affichage limite aux 200 premiers ({shown.length} au total dans le filtre).</div>}
       </div>
     </div>
   );
 }
 
-const FILTERS = ["all", "needs_work", "proposed", "applied", "not_audited"];
+const PRODUCT_STATUS_META: Record<string, { label: string; cls: string }> = {
+  not_audited: { label: "Pas audite", cls: "text-zinc-500" },
+  audited: { label: "Audite", cls: "text-sky-300" },
+  needs_work: { label: "A retravailler", cls: "text-amber-300" },
+  optimization_pending: { label: "Optim en cours", cls: "text-amber-300" },
+  proposed: { label: "Propose", cls: "text-emerald-300" },
+  applied: { label: "Applique", cls: "text-emerald-300" },
+  failed: { label: "Erreur", cls: "text-red-300" },
+  error: { label: "Erreur", cls: "text-red-300" },
+};
+const PRODUCT_FILTERS: { v: string; label: string }[] = [
+  { v: "all", label: "Tout" },
+  { v: "needs_work", label: "A retravailler" },
+  { v: "audited", label: "Audite" },
+  { v: "not_audited", label: "Pas audite" },
+  { v: "proposed", label: "Propose" },
+  { v: "applied", label: "Applique" },
+  { v: "failed", label: "Erreur" },
+];
+
+function ProductStatusBadge({ status }: { status: string }) {
+  const m = PRODUCT_STATUS_META[status] || { label: status, cls: "text-zinc-500" };
+  return <span className={cn("inline-flex items-center gap-1 text-[11px] font-medium uppercase tracking-wide", m.cls)}><StatusDot status={status} /> {m.label}</span>;
+}
 
 function ProductsTab({ siteId, api, setMsg }: { siteId: string; api: ApiFn; setMsg: (s: string | null) => void }) {
   const [products, setProducts] = useState<any[]>([]);
   const [busy, setBusy] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [filter, setFilter] = useState("all");
+  const [search, setSearch] = useState("");
   const [sel, setSel] = useState<Set<string>>(new Set());
   const [drawer, setDrawer] = useState<any>(null);
   const pw = typeof window !== "undefined" ? localStorage.getItem(PW_KEY) || "" : "";
@@ -996,7 +1073,7 @@ function ProductsTab({ siteId, api, setMsg }: { siteId: string; api: ApiFn; setM
   useEffect(() => { load(); }, [load]);
 
   async function auditAll() {
-    setBusy("auditall"); setMsg("Audit heuristique en masse...");
+    setBusy("auditall"); setMsg("Audit heuristique en masse (peut prendre 1 a 3 min)...");
     const { ok, json } = await api(`/api/admin/sites/${siteId}/products/audit-batch`, { method: "POST", body: JSON.stringify({ limit: 1500 }) });
     setBusy(null); setMsg(ok ? `${json.audited} produit(s) audites` : `Erreur: ${json.error}`); load();
   }
@@ -1004,7 +1081,7 @@ function ProductsTab({ siteId, api, setMsg }: { siteId: string; api: ApiFn; setM
     if (!sel.size) return;
     setBusy("optsel"); setMsg(`Optimisation de ${sel.size} produit(s) (Sonnet)...`);
     const { ok, json } = await api(`/api/admin/sites/${siteId}/products/optimize-batch`, { method: "POST", body: JSON.stringify({ external_ids: Array.from(sel) }) });
-    setBusy(null); setMsg(ok ? `${json.optimized}/${json.queued} optimise(s)` : `Erreur: ${json.error}`); setSel(new Set()); load();
+    setBusy(null); setMsg(ok ? `${json.optimized ?? json.queued ?? sel.size} optimise(s)` : `Erreur: ${json.error}`); setSel(new Set()); load();
   }
   async function apply(id: string) {
     setBusy(id + "p"); setMsg("Application sur Shopify...");
@@ -1018,131 +1095,219 @@ function ProductsTab({ siteId, api, setMsg }: { siteId: string; api: ApiFn; setM
   }
   const toggle = (id: string) => setSel((s) => { const n = new Set(s); if (n.has(id)) n.delete(id); else n.add(id); return n; });
 
-  const shown = products.filter((p) => filter === "all" || p.status === filter);
+  const q = search.trim().toLowerCase();
+  const shown = products
+    .filter((p) => filter === "all" || p.status === filter)
+    .filter((p) => !q || (p.title || "").toLowerCase().includes(q) || (p.product_type || "").toLowerCase().includes(q));
   const scored = products.filter((p) => p.audit_score != null);
   const avg = scored.length ? Math.round(scored.reduce((a, p) => a + p.audit_score, 0) / scored.length) : 0;
-  if (loading) return <p className="text-sm text-zinc-400"><Loader2 size={14} className="inline animate-spin" /> Chargement des produits Shopify...</p>;
+  const countFor = (v: string) => (v === "all" ? products.length : products.filter((p) => p.status === v).length);
+  const allShownSelected = shown.length > 0 && shown.every((p) => sel.has(p.external_id));
+  const toggleAll = () => setSel((s) => {
+    const n = new Set(s);
+    if (allShownSelected) shown.forEach((p) => n.delete(p.external_id));
+    else shown.forEach((p) => n.add(p.external_id));
+    return n;
+  });
+
+  if (loading) return <Spinner label="Chargement des produits Shopify..." />;
 
   return (
-    <div className="space-y-3">
-      <div className="flex flex-wrap items-center gap-2">
-        {FILTERS.map((fl) => (
-          <button key={fl} onClick={() => setFilter(fl)} className={`rounded-full border px-2.5 py-1 text-xs ${filter === fl ? "border-emerald-600 text-emerald-300" : "border-zinc-700 text-zinc-400"}`}>{fl}</button>
-        ))}
-        <div className="ml-auto flex gap-2">
-          <button onClick={auditAll} disabled={busy === "auditall"} className={ghostBtn}>
-            {busy === "auditall" ? <Loader2 size={12} className="animate-spin" /> : <Wand2 size={12} />} Auditer tout
+    <div className="space-y-4">
+      {/* Header */}
+      <div className="flex flex-wrap items-end justify-between gap-3">
+        <div>
+          <div className="eyebrow">Catalogue produits</div>
+          <div className="mt-1 flex items-baseline gap-3">
+            <span className="text-2xl font-semibold text-zinc-100">{products.length}</span>
+            <span className="text-sm text-zinc-500">score moyen {avg}/100</span>
+          </div>
+        </div>
+        <div className="flex gap-2">
+          <button onClick={auditAll} disabled={busy === "auditall"} className="btn-ghost">
+            {busy === "auditall" ? <Loader2 size={14} className="animate-spin" /> : <Wand2 size={14} />} Auditer tout (1500 max)
           </button>
-          <button onClick={optimizeSel} disabled={busy === "optsel" || !sel.size} className={primaryBtn}>
+          <button onClick={optimizeSel} disabled={busy === "optsel" || !sel.size} className="btn-emerald">
             {busy === "optsel" ? <Loader2 size={14} className="animate-spin" /> : <Sparkles size={14} />} Optimiser ({sel.size})
           </button>
         </div>
       </div>
 
-      <div className="flex gap-4 text-xs text-zinc-500">
-        <span>{products.length} produits</span>
-        <span>Score moyen: {avg}/100</span>
-        <span>Need work: {products.filter((p) => p.status === "needs_work").length}</span>
-        <span>Proposes: {products.filter((p) => p.status === "proposed").length}</span>
-        <span>Appliques: {products.filter((p) => p.status === "applied").length}</span>
+      {/* Filter chips */}
+      <div className="flex flex-wrap items-center gap-1.5">
+        {PRODUCT_FILTERS.map((fl) => (
+          <button key={fl.v} onClick={() => setFilter(fl.v)} className={cn("pill", filter === fl.v && "pill-active")}>
+            {fl.label} <span className="opacity-70">{countFor(fl.v)}</span>
+          </button>
+        ))}
       </div>
 
-      {shown.length === 0 && <p className="text-sm text-zinc-500">Aucun produit dans ce filtre.</p>}
-      {shown.map((p) => (
-        <div key={p.external_id} className="flex items-center justify-between rounded-lg border border-zinc-800 bg-zinc-900/40 p-3">
-          <div className="flex min-w-0 items-center gap-3">
-            <input type="checkbox" checked={sel.has(p.external_id)} onChange={() => toggle(p.external_id)} />
-            {p.image && <img src={p.image} alt="" className="h-10 w-10 rounded object-cover" />}
-            <div className="min-w-0">
-              <p className="truncate text-sm text-zinc-200">{p.title}</p>
-              <div className="flex flex-wrap items-center gap-2">
-                <Status status={p.status} />
-                {p.audit_score != null && <span className={`text-xs ${p.audit_score >= 80 ? "text-emerald-400" : p.audit_score >= 40 ? "text-amber-400" : "text-red-400"}`}>score {p.audit_score}</span>}
-                {(p.audit_issues || []).slice(0, 3).map((iss: string) => <span key={iss} className="rounded bg-red-950/40 px-1.5 text-[10px] text-red-300">{iss}</span>)}
+      {/* Search + select all */}
+      <div className="flex flex-wrap items-center gap-2">
+        <div className="relative flex-1 min-w-[240px]">
+          <Search size={14} className="pointer-events-none absolute left-3 top-1/2 -translate-y-1/2 text-zinc-600" />
+          <input value={search} onChange={(e) => setSearch(e.target.value)} className="input-base pl-9" placeholder="Recherche par titre ou type de produit" />
+        </div>
+        <button onClick={toggleAll} className="btn-ghost btn-sm shrink-0">
+          {allShownSelected ? "Tout deselectionner" : `Tout selectionner (${shown.length})`}
+        </button>
+      </div>
+
+      {/* List */}
+      <div className="space-y-2">
+        {shown.length === 0 && <EmptyState>Aucun produit dans ce filtre.</EmptyState>}
+        {shown.map((p) => (
+          <div key={p.external_id} className="card-base flex items-center justify-between gap-3 p-3">
+            <div className="flex min-w-0 items-center gap-3">
+              <input type="checkbox" checked={sel.has(p.external_id)} onChange={() => toggle(p.external_id)} className="h-4 w-4 accent-emerald-500" />
+              {p.image ? (
+                // eslint-disable-next-line @next/next/no-img-element
+                <img src={p.image} alt="" className="h-11 w-11 shrink-0 rounded-md object-cover" />
+              ) : (
+                <div className="flex h-11 w-11 shrink-0 items-center justify-center rounded-md bg-white/[0.03] text-zinc-700"><Package size={18} /></div>
+              )}
+              <div className="min-w-0">
+                <p className="truncate text-sm text-zinc-200">{p.title}</p>
+                <div className="mt-0.5 flex flex-wrap items-center gap-2">
+                  <ProductStatusBadge status={p.status} />
+                  {p.audit_score != null && <span className={cn("text-xs font-medium", p.audit_score >= 80 ? "text-emerald-400" : p.audit_score >= 40 ? "text-amber-400" : "text-red-400")}>score {p.audit_score}</span>}
+                  {(p.audit_issues || []).slice(0, 3).map((iss: string) => <span key={iss} className="rounded bg-red-500/10 px-1.5 py-0.5 text-[10px] text-red-300">{iss}</span>)}
+                </div>
               </div>
             </div>
+            <div className="flex shrink-0 items-center gap-1.5">
+              {p.url && <a href={p.url} target="_blank" rel="noreferrer" className="btn-icon h-8 w-8" aria-label="Voir"><ExternalLink size={13} /></a>}
+              {p.has_proposal && (
+                <button onClick={() => apply(p.external_id)} disabled={busy === p.external_id + "p"} className="btn-ghost btn-sm">
+                  {busy === p.external_id + "p" ? <Loader2 size={12} className="animate-spin" /> : <UploadCloud size={12} />} Appliquer
+                </button>
+              )}
+              {p.status === "applied" && (
+                <button onClick={() => revert(p.external_id)} disabled={busy === p.external_id + "r"} className="btn-ghost btn-sm" title="Restaurer l'origine">
+                  {busy === p.external_id + "r" ? <Loader2 size={12} className="animate-spin" /> : <Undo2 size={12} />} Annuler
+                </button>
+              )}
+              <button onClick={() => setDrawer(p)} className="btn-ghost btn-sm">Detail</button>
+            </div>
           </div>
-          <div className="flex items-center gap-2">
-            <button onClick={() => setDrawer(p)} className={ghostBtn}><ExternalLink size={12} /> Detail</button>
-            {p.has_proposal && (
-              <button onClick={() => apply(p.external_id)} disabled={busy === p.external_id + "p"} className={ghostBtn}>
-                {busy === p.external_id + "p" ? <Loader2 size={12} className="animate-spin" /> : <UploadCloud size={12} />} Appliquer
-              </button>
-            )}
-            {p.status === "applied" && (
-              <button onClick={() => revert(p.external_id)} disabled={busy === p.external_id + "r"} className={ghostBtn} title="Restaurer l'origine">
-                {busy === p.external_id + "r" ? <Loader2 size={12} className="animate-spin" /> : <Undo2 size={12} />} Annuler
-              </button>
-            )}
-          </div>
-        </div>
-      ))}
+        ))}
+      </div>
 
-      {drawer && <ProductDrawer siteId={siteId} api={api} product={drawer} pw={pw} onClose={() => setDrawer(null)} />}
+      {drawer && <ProductDrawer siteId={siteId} api={api} product={drawer} pw={pw} setMsg={setMsg} onChanged={load} onClose={() => setDrawer(null)} />}
     </div>
   );
 }
 
-function ProductDrawer({ siteId, api, product, pw, onClose }: { siteId: string; api: ApiFn; product: any; pw: string; onClose: () => void }) {
+const CRO_SIGNAL_LABELS: Record<string, string> = {
+  urgency_present: "Urgence",
+  social_proof_present: "Preuve sociale",
+  risk_reversal_present: "Garantie / risque inverse",
+  delivery_clarity: "Livraison claire",
+};
+
+function ProductDrawer({ siteId, api, product, pw, setMsg, onChanged, onClose }: { siteId: string; api: ApiFn; product: any; pw: string; setMsg: (s: string | null) => void; onChanged: () => void; onClose: () => void }) {
   const [data, setData] = useState<any>(null);
-  useEffect(() => {
+  const [busy, setBusy] = useState<string | null>(null);
+  const reload = useCallback(() => {
     api(`/api/admin/sites/${siteId}/products/proposed?external_id=${encodeURIComponent(product.external_id)}`).then(({ ok, json }) => ok && setData(json));
   }, [siteId, api, product.external_id]);
+  useEffect(() => { reload(); }, [reload]);
+
   const pp = data?.proposed;
   const cm = pp?.channel_meta;
   const cro = pp?.cro_signals;
+
+  async function optimize() {
+    setBusy("opt"); setMsg("Optimisation IA en cours (Sonnet, 30 a 90s)...");
+    const { ok, json } = await api(`/api/admin/sites/${siteId}/products/optimize-batch`, { method: "POST", body: JSON.stringify({ external_ids: [product.external_id] }) });
+    setBusy(null); setMsg(ok ? "Optimisation lancee / terminee." : `Erreur: ${json.error}`); reload(); onChanged();
+  }
+  async function applyNow() {
+    setBusy("apply"); setMsg("Application sur Shopify...");
+    const { ok, json } = await api(`/api/admin/sites/${siteId}/products/apply`, { method: "POST", body: JSON.stringify({ external_id: product.external_id }) });
+    setBusy(null); setMsg(ok ? "Fiche produit mise a jour." : `Erreur: ${json.error}`); onChanged();
+  }
+
   const Diff = ({ label, a, b }: { label: string; a?: string; b?: string }) => (
-    <div className="grid grid-cols-2 gap-2 text-xs">
-      <div><p className="mb-1 text-zinc-500">{label} avant</p><p className="line-clamp-3 text-zinc-400">{a || "-"}</p></div>
-      <div><p className="mb-1 text-zinc-500">{label} apres</p><p className="line-clamp-3 text-emerald-300">{b || "-"}</p></div>
+    <div className="grid grid-cols-2 gap-3 text-xs">
+      <div><p className="eyebrow mb-1">{label} avant</p><p className="line-clamp-4 text-zinc-500">{a || "-"}</p></div>
+      <div><p className="eyebrow mb-1">{label} apres</p><p className="line-clamp-4 text-emerald-300">{b || "-"}</p></div>
     </div>
   );
+
   return (
-    <div className="fixed inset-0 z-50 flex justify-end bg-black/60">
-      <div className="h-full w-full max-w-2xl overflow-y-auto border-l border-zinc-800 bg-zinc-950 p-6">
-        <div className="mb-4 flex items-center justify-between">
-          <h2 className="truncate font-semibold">{product.title}</h2>
-          <button onClick={onClose} className="text-zinc-400 hover:text-zinc-100"><Undo2 size={18} /></button>
+    <Drawer
+      title={product.title}
+      subtitle={<span className="font-mono text-zinc-600">Fiche produit</span>}
+      onClose={onClose}
+      headerRight={
+        <div className="flex items-center gap-2">
+          {product.url && <a href={product.url} target="_blank" rel="noreferrer" className="btn-ghost btn-sm"><ExternalLink size={13} /> Voir sur la boutique</a>}
+          <button onClick={optimize} disabled={busy === "opt"} className="btn-emerald btn-sm">{busy === "opt" ? <Loader2 size={13} className="animate-spin" /> : <Sparkles size={13} />} Lancer optim IA</button>
         </div>
-        {!data && <p className="text-sm text-zinc-400"><Loader2 size={14} className="inline animate-spin" /> Chargement...</p>}
-        {data && (
-          <div className="space-y-4">
-            <div className="flex items-center gap-3 text-sm">
-              <span className={`${data.audit_score >= 80 ? "text-emerald-400" : data.audit_score >= 40 ? "text-amber-400" : "text-red-400"}`}>Score audit {data.audit_score}/100</span>
-              <Status status={data.status} />
-            </div>
-            {(data.audit_issues || []).length > 0 && (
-              <div className="flex flex-wrap gap-1">{data.audit_issues.map((i: string) => <span key={i} className="rounded bg-red-950/40 px-1.5 text-[10px] text-red-300">{i}</span>)}</div>
-            )}
-            {!pp && <p className="text-sm text-zinc-500">Pas encore de version optimisee. Selectionne le produit et clique Optimiser.</p>}
-            {pp && (
-              <>
-                <Diff label="Titre" a={data.current?.title} b={pp.title} />
-                <Diff label="Description" a={(data.current?.body_html || "").replace(/<[^>]+>/g, " ").slice(0, 200)} b={(pp.body_html || "").replace(/<[^>]+>/g, " ").slice(0, 200)} />
-                {cm && (
+      }
+    >
+      {!data ? <Spinner /> : (
+        <div className="space-y-5">
+          <div className="flex items-center gap-3 text-sm">
+            {data.audit_score != null && <span className={cn("font-medium", data.audit_score >= 80 ? "text-emerald-400" : data.audit_score >= 40 ? "text-amber-400" : "text-red-400")}>Score audit {data.audit_score}/100</span>}
+            <ProductStatusBadge status={data.status} />
+          </div>
+          {(data.audit_issues || []).length > 0 && (
+            <div className="flex flex-wrap gap-1.5">{data.audit_issues.map((i: string) => <span key={i} className="rounded bg-red-500/10 px-1.5 py-0.5 text-[10px] text-red-300">{i}</span>)}</div>
+          )}
+
+          {!pp ? (
+            <EmptyState>Pas encore de version optimisee. Clique &quot;Lancer optim IA&quot; en haut.</EmptyState>
+          ) : (
+            <>
+              <Diff label="Titre" a={data.current?.title} b={pp.title} />
+              <Diff label="Description" a={(data.current?.body_html || "").replace(/<[^>]+>/g, " ").slice(0, 240)} b={(pp.body_html || "").replace(/<[^>]+>/g, " ").slice(0, 240)} />
+
+              {cro && (
+                <div>
+                  <p className="eyebrow mb-2">Signaux CRO</p>
+                  <div className="flex flex-wrap gap-2">
+                    {Object.entries(CRO_SIGNAL_LABELS).map(([k, label]) => {
+                      const on = !!cro[k];
+                      return (
+                        <span key={k} className={cn("inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-xs", on ? "bg-emerald-500/15 text-emerald-300" : "bg-white/[0.04] text-zinc-600")}>
+                          {on ? <Check size={12} /> : <X size={12} />} {label}
+                        </span>
+                      );
+                    })}
+                  </div>
+                </div>
+              )}
+
+              {cm && (
+                <div>
+                  <p className="eyebrow mb-2">Meta par canal</p>
                   <div className="grid gap-2 sm:grid-cols-3">
-                    {[["Shopify", cm.shopify], ["Google", cm.google_shopping], ["Meta Ads", cm.meta_ads]].map(([name, m]: any) => (
-                      <div key={name} className="rounded-lg border border-zinc-800 bg-zinc-900/40 p-2 text-[11px]">
+                    {[["Shopify", cm.shopify], ["Google Shopping", cm.google_shopping], ["Meta Ads", cm.meta_ads]].map(([name, m]: any) => (
+                      <div key={name} className="rounded-lg border border-white/[0.07] bg-black/20 p-2.5 text-[11px]">
                         <p className="mb-1 font-medium text-zinc-300">{name}</p>
-                        <pre className="whitespace-pre-wrap break-words text-zinc-500">{JSON.stringify(m, null, 1)}</pre>
+                        <pre className="max-h-40 overflow-auto whitespace-pre-wrap break-words font-mono text-zinc-500">{JSON.stringify(m, null, 1)}</pre>
                       </div>
                     ))}
                   </div>
-                )}
-                {cro && (
-                  <div className="flex flex-wrap gap-2">
-                    {Object.entries(cro).map(([k, v]) => (
-                      <span key={k} className={`rounded-full px-2 py-0.5 text-[10px] ${v ? "bg-emerald-500/15 text-emerald-300" : "bg-zinc-800 text-zinc-500"}`}>{k}</span>
-                    ))}
-                  </div>
-                )}
-                <iframe src={`/api/admin/sites/${siteId}/products/preview?external_id=${encodeURIComponent(product.external_id)}&pw=${encodeURIComponent(pw)}`} className="h-96 w-full rounded-lg border border-zinc-800 bg-white" />
-              </>
-            )}
-          </div>
-        )}
-      </div>
-    </div>
+                </div>
+              )}
+
+              <div>
+                <p className="eyebrow mb-2">Apercu de la fiche optimisee</p>
+                <iframe title="preview" src={`/api/admin/sites/${siteId}/products/preview?external_id=${encodeURIComponent(product.external_id)}&pw=${encodeURIComponent(pw)}`} className="h-[28rem] w-full rounded-lg border border-white/10 bg-white" />
+              </div>
+
+              <div className="flex gap-2 border-t border-white/[0.06] pt-4">
+                <button onClick={applyNow} disabled={busy === "apply"} className="btn-primary">{busy === "apply" ? <Loader2 size={14} className="animate-spin" /> : <UploadCloud size={14} />} Appliquer sur Shopify</button>
+                <button onClick={optimize} disabled={busy === "opt"} className="btn-ghost">{busy === "opt" ? <Loader2 size={14} className="animate-spin" /> : <Sparkles size={14} />} Re-optimiser</button>
+              </div>
+            </>
+          )}
+        </div>
+      )}
+    </Drawer>
   );
 }
 
@@ -1150,6 +1315,15 @@ const TAX_DIMS: [string, string, number][] = [
   ["description", "Description", 30], ["meta_title", "Meta title", 15], ["meta_description", "Meta desc", 15],
   ["image", "Image", 10], ["products_count", "Produits", 10], ["internal_links", "Liens int.", 10], ["headings_structure", "Headings", 10],
 ];
+
+function barColor(ratio: number): string {
+  return ratio >= 0.8 ? "bg-emerald-500" : ratio >= 0.4 ? "bg-amber-500" : "bg-red-500";
+}
+function ScoreBox({ score }: { score: number | null }) {
+  const cls = score == null ? "bg-white/[0.04] text-zinc-500" : score >= 80 ? "bg-emerald-500/15 text-emerald-300" : score >= 40 ? "bg-amber-500/15 text-amber-300" : "bg-red-500/15 text-red-300";
+  return <span className={cn("flex h-9 w-9 shrink-0 items-center justify-center rounded-md text-sm font-bold", cls)}>{score ?? "-"}</span>;
+}
+const NEG_NOTE = /aucun|manqu|absent|trop|peu de|courte|court |vide|0 /i;
 
 function CategoriesTab({ siteId, api, setMsg }: { siteId: string; api: ApiFn; setMsg: (s: string | null) => void }) {
   const [taxos, setTaxos] = useState<any[]>([]);
@@ -1170,10 +1344,10 @@ function CategoriesTab({ siteId, api, setMsg }: { siteId: string; api: ApiFn; se
   async function sync() {
     setBusy("sync"); setMsg("Sync + audit 7 dimensions...");
     const { ok, json } = await api(`/api/admin/sites/${siteId}/taxonomies/sync`, { method: "POST", body: JSON.stringify({}) });
-    setBusy(null); setMsg(ok ? `${json.fetched} categories, score moyen ${json.summary.avg}` : `Erreur: ${json.error}`); load();
+    setBusy(null); setMsg(ok ? `${json.fetched} categories, score moyen ${json.summary?.avg ?? "-"}` : `Erreur: ${json.error}`); load();
   }
   async function analyze(id: string) {
-    setBusy(id + "a"); setMsg("Analyse IA (SERP + FAQ + schema)...");
+    setBusy(id + "a"); setMsg("Analyse IA (SERP + intent + H1 + FAQ + liens + schema)...");
     const { ok, json } = await api(`/api/admin/sites/${siteId}/taxonomies/analyze`, { method: "POST", body: JSON.stringify({ tax_id: id }) });
     setBusy(null); setMsg(ok ? "Version optimisee prete." : `Erreur: ${json.error}`); load();
   }
@@ -1196,78 +1370,127 @@ function CategoriesTab({ siteId, api, setMsg }: { siteId: string; api: ApiFn; se
     if (sort === "name-asc") return a.name.localeCompare(b.name);
     return (b.products_count || 0) - (a.products_count || 0);
   });
-  const scoreColor = (s: number | null) => s == null ? "text-zinc-500" : s >= 80 ? "text-emerald-400" : s >= 40 ? "text-amber-400" : "text-red-400";
 
-  if (loading) return <p className="text-sm text-zinc-400"><Loader2 size={14} className="inline animate-spin" /> Chargement...</p>;
+  if (loading) return <Spinner label="Chargement des categories..." />;
 
   return (
-    <div className="space-y-4">
-      <div className="flex items-center justify-between">
-        <p className="text-xs text-zinc-500">Audit SEO par categorie. Score 0-100 sur 7 dimensions.</p>
-        <button onClick={sync} disabled={busy === "sync"} className={primaryBtn}>
-          {busy === "sync" ? <Loader2 size={14} className="animate-spin" /> : <UploadCloud size={14} />} Sync + audit
+    <div className="space-y-5">
+      <div className="flex flex-wrap items-start justify-between gap-3">
+        <div>
+          <h2 className="flex items-center gap-2 text-lg font-semibold text-zinc-100"><Tag size={17} /> Product Categories</h2>
+          <p className="mt-1 max-w-3xl text-sm text-zinc-500">Audit SEO de chaque categorie / collection. Score 0-100 par dimension : description, meta, image, maillage, structure, headings.</p>
+        </div>
+        <button onClick={sync} disabled={busy === "sync"} className="btn-emerald">
+          {busy === "sync" ? <Loader2 size={14} className="animate-spin" /> : <RefreshCw size={14} />} Sync depuis la plateforme
         </button>
       </div>
 
-      <div className="grid grid-cols-2 gap-2 md:grid-cols-5">
-        {[["Total", taxos.length], ["Score moyen", avg], ["Excellentes", scored.filter((t) => t.quality_score >= 80).length], ["Moyennes", scored.filter((t) => t.quality_score >= 40 && t.quality_score < 80).length], ["Critiques", scored.filter((t) => t.quality_score < 40).length]].map(([l, v]) => (
-          <div key={l} className={`${cardCls} text-center`}><div className="text-xl font-semibold text-zinc-100">{v}</div><div className="text-[10px] uppercase text-zinc-500">{l}</div></div>
-        ))}
+      <div className="grid grid-cols-2 gap-3 md:grid-cols-5">
+        <StatCard label="Total" value={taxos.length} hint="categories" />
+        <StatCard label="Score moyen" value={`${avg}/100`} hint="0 a 100" tone={avg >= 80 ? "success" : avg >= 40 ? "warn" : "default"} />
+        <StatCard label="Excellentes" value={scored.filter((t) => t.quality_score >= 80).length} hint="80 et plus" tone="success" />
+        <StatCard label="Moyennes" value={scored.filter((t) => t.quality_score >= 40 && t.quality_score < 80).length} hint="40 a 79" tone="warn" />
+        <StatCard label="Critiques" value={scored.filter((t) => t.quality_score < 40).length} hint="moins de 40" tone="danger" />
       </div>
 
-      <div className="flex justify-end">
-        <select value={sort} onChange={(e) => setSort(e.target.value)} className={`${inputCls} w-auto`}>
-          <option value="score-asc">Score (pire -&gt; meilleur)</option>
-          <option value="score-desc">Score (meilleur -&gt; pire)</option>
-          <option value="name-asc">Nom (A-Z)</option>
-          <option value="products-desc">Plus de produits</option>
-        </select>
+      <div className="flex items-center justify-between">
+        <span className="text-sm text-zinc-500">{taxos.length} categories</span>
+        <div className="flex items-center gap-2 text-sm text-zinc-500">
+          Trier :
+          <select value={sort} onChange={(e) => setSort(e.target.value)} className="input-base w-auto py-1.5">
+            <option value="score-asc">Score (pire vers meilleur)</option>
+            <option value="score-desc">Score (meilleur vers pire)</option>
+            <option value="name-asc">Nom (A-Z)</option>
+            <option value="products-desc">Plus de produits</option>
+          </select>
+        </div>
       </div>
 
-      {sorted.length === 0 && <p className="text-sm text-zinc-500">Aucune categorie. Clique Sync + audit.</p>}
+      {sorted.length === 0 && <EmptyState>Aucune categorie. Clique &quot;Sync depuis la plateforme&quot;.</EmptyState>}
       <div className="space-y-2">
         {sorted.map((t) => {
           const bd = t.quality_breakdown;
           const open = expanded === t.id;
+          const notes: string[] = Array.isArray(bd?.notes) ? bd.notes : [];
           return (
-            <div key={t.id} className="rounded-lg border border-zinc-800 bg-zinc-900/40">
-              <button onClick={() => setExpanded(open ? null : t.id)} className="flex w-full items-center gap-3 p-3 text-left">
-                <span className={`text-lg font-bold ${scoreColor(t.quality_score)}`}>{t.quality_score ?? "-"}</span>
-                <span className="min-w-0 flex-1"><span className="block truncate text-sm text-zinc-200">{t.name}</span><span className="text-xs text-zinc-500">/{t.handle} · {t.products_count} produits</span></span>
-                {open ? <ChevronRight size={16} className="rotate-90 text-zinc-500" /> : <ChevronRight size={16} className="text-zinc-500" />}
+            <div key={t.id} className="overflow-hidden rounded-xl border border-white/[0.07] bg-white/[0.02]">
+              <button onClick={() => setExpanded(open ? null : t.id)} className="flex w-full items-center gap-3 p-3 text-left transition hover:bg-white/[0.02]">
+                <ScoreBox score={t.quality_score} />
+                <span className="min-w-0 flex-1">
+                  <span className="block truncate text-sm font-medium text-zinc-100">{t.name}</span>
+                  <span className="text-xs text-zinc-500">/{t.handle} · {t.products_count} produits</span>
+                </span>
+                {t.url && <a href={t.url} target="_blank" rel="noreferrer" onClick={(e) => e.stopPropagation()} className="text-zinc-600 hover:text-emerald-400"><ExternalLink size={14} /></a>}
+                <ChevronRight size={16} className={cn("text-zinc-500 transition", open && "rotate-90")} />
               </button>
               {open && (
-                <div className="border-t border-zinc-800 p-3">
+                <div className="border-t border-white/[0.06] p-4">
                   {bd && (
-                    <div className="mb-3 space-y-1">
-                      {TAX_DIMS.map(([k, label, max]) => (
-                        <div key={k} className="flex items-center gap-2 text-xs">
-                          <span className="w-24 text-zinc-500">{label}</span>
-                          <div className="h-1.5 flex-1 rounded bg-zinc-800"><div className="h-1.5 rounded bg-emerald-500" style={{ width: `${((bd[k] || 0) / max) * 100}%` }} /></div>
-                          <span className="w-10 text-right text-zinc-500">{bd[k] ?? 0}/{max}</span>
-                        </div>
-                      ))}
+                    <>
+                      <p className="eyebrow mb-2">Breakdown ({t.quality_score}/100)</p>
+                      <div className="mb-4 grid gap-x-6 gap-y-2 sm:grid-cols-2 lg:grid-cols-4">
+                        {TAX_DIMS.map(([k, label, max]) => {
+                          const val = bd[k] ?? 0;
+                          const ratio = max ? val / max : 0;
+                          return (
+                            <div key={k}>
+                              <div className="flex items-center justify-between text-[11px]">
+                                <span className="text-zinc-400">{label}</span>
+                                <span className="tabular-nums text-zinc-500">{val}/{max}</span>
+                              </div>
+                              <div className="mt-1 h-1.5 rounded-full bg-white/[0.06]"><div className={cn("h-1.5 rounded-full", barColor(ratio))} style={{ width: `${Math.max(4, ratio * 100)}%` }} /></div>
+                            </div>
+                          );
+                        })}
+                      </div>
+                    </>
+                  )}
+                  {notes.length > 0 && (
+                    <div className="mb-4">
+                      <p className="eyebrow mb-1.5">Diagnostic</p>
+                      <div className="space-y-1">
+                        {notes.map((n: string, i: number) => {
+                          const neg = NEG_NOTE.test(n);
+                          return (
+                            <p key={i} className={cn("flex items-start gap-1.5 text-xs", neg ? "text-red-300" : "text-zinc-300")}>
+                              {neg ? <AlertCircle size={13} className="mt-0.5 shrink-0 text-red-400" /> : <CheckCircle2 size={13} className="mt-0.5 shrink-0 text-emerald-400" />}
+                              {n}
+                            </p>
+                          );
+                        })}
+                      </div>
                     </div>
                   )}
-                  {bd?.notes?.length > 0 && (
-                    <div className="mb-3 space-y-0.5">
-                      {bd.notes.map((n: string, i: number) => <p key={i} className="text-xs text-amber-300">{n}</p>)}
+                  <div className="mb-4 grid gap-3 text-xs sm:grid-cols-2">
+                    <div>
+                      <p className="eyebrow mb-1">Meta title actuel</p>
+                      <p className="text-zinc-400">{t.current_meta_title || <span className="italic text-red-400">(absent)</span>}</p>
                     </div>
-                  )}
-                  <div className="flex flex-wrap items-center gap-2">
-                    <button onClick={() => setHistFor(t)} className={ghostBtn}><History size={12} /> Historique</button>
-                    <button onClick={() => genImage(t.id)} disabled={busy === t.id + "i"} className={ghostBtn}>
-                      {busy === t.id + "i" ? <Loader2 size={12} className="animate-spin" /> : <ImageIcon size={12} />} {t.current_image_url ? "Re-generer image" : "Generer image"}
-                    </button>
-                    {t.analyzed_at && t.url && <a href={t.url} target="_blank" rel="noreferrer" className={ghostBtn}><ExternalLink size={12} /> Voir l&apos;optimisee</a>}
-                    <button onClick={() => analyze(t.id)} disabled={busy === t.id + "a"} className={ghostBtn}>
-                      {busy === t.id + "a" ? <Loader2 size={12} className="animate-spin" /> : <Sparkles size={12} />} {t.analyzed_at ? "Re-generer" : "Generer version optimisee"}
-                    </button>
-                    {t.suggested_description_html && (
-                      <button onClick={() => push(t.id)} disabled={busy === t.id + "p"} className={primaryBtn}>
-                        {busy === t.id + "p" ? <Loader2 size={12} className="animate-spin" /> : <UploadCloud size={12} />} Pousser
+                    <div>
+                      <p className="eyebrow mb-1">Meta description actuelle</p>
+                      <p className="line-clamp-2 text-zinc-400">{t.current_meta_description || <span className="italic text-red-400">(absente)</span>}</p>
+                    </div>
+                  </div>
+                  <div className="flex flex-wrap items-center justify-between gap-3 border-t border-white/[0.06] pt-3">
+                    <span className="text-[11px] text-zinc-600">
+                      {t.audit_at ? `Auditee le ${formatDateTime(t.audit_at)}` : "Pas encore auditee"}
+                      {t.analyzed_at && <span className="text-emerald-400"> · Optimisee le {formatDateTime(t.analyzed_at)}</span>}
+                    </span>
+                    <div className="flex flex-wrap items-center gap-1.5">
+                      <button onClick={() => setHistFor(t)} className="btn-ghost btn-sm"><History size={12} /> Historique</button>
+                      <button onClick={() => genImage(t.id)} disabled={busy === t.id + "i"} className="btn-violet btn-sm" title={t.current_image_url ? "Regenere l'image et ecrase l'actuelle (l'ancienne reste dans l'historique)" : "Genere une image de categorie coherente avec le branding"}>
+                        {busy === t.id + "i" ? <Loader2 size={12} className="animate-spin" /> : <ImageIcon size={12} />} {t.current_image_url ? "Re-generer image" : "Generer image"}
                       </button>
-                    )}
+                      {t.analyzed_at && t.url && <a href={t.url} target="_blank" rel="noreferrer" className="btn-ghost btn-sm"><ExternalLink size={12} /> Voir l&apos;optimisee</a>}
+                      <button onClick={() => analyze(t.id)} disabled={busy === t.id + "a"} className="btn-emerald btn-sm">
+                        {busy === t.id + "a" ? <Loader2 size={12} className="animate-spin" /> : <Sparkles size={12} />} {t.analyzed_at ? "Re-generer" : "Generer version optimisee"}
+                      </button>
+                      {t.suggested_description_html && (
+                        <button onClick={() => push(t.id)} disabled={busy === t.id + "p"} className="btn-primary btn-sm">
+                          {busy === t.id + "p" ? <Loader2 size={12} className="animate-spin" /> : <UploadCloud size={12} />} Pousser en live
+                        </button>
+                      )}
+                    </div>
                   </div>
                 </div>
               )}
@@ -1280,43 +1503,64 @@ function CategoriesTab({ siteId, api, setMsg }: { siteId: string; api: ApiFn; se
   );
 }
 
+const TAX_KIND_META: Record<string, { label: string; cls: string }> = {
+  collection_image: { label: "Image categorie", cls: "text-purple-300" },
+  collection_optimized_draft: { label: "Version optimisee generee", cls: "text-emerald-300" },
+  collection_pushed_live: { label: "Poussee en live", cls: "text-sky-300" },
+  collection_description: { label: "Description modifiee", cls: "text-zinc-300" },
+  meta_title: { label: "Meta title", cls: "text-zinc-300" },
+  meta_description: { label: "Meta description", cls: "text-zinc-300" },
+};
+function isImageUrl(s?: string | null): boolean {
+  return typeof s === "string" && /^https?:\/\//.test(s) && /\.(jpg|jpeg|png|webp|gif|avif)(\?|$)/i.test(s.split("?")[0]);
+}
+
 function HistoryDrawer({ siteId, api, tax, onClose }: { siteId: string; api: ApiFn; tax: any; onClose: () => void }) {
   const [events, setEvents] = useState<any[]>([]);
+  const [loading, setLoading] = useState(true);
   useEffect(() => {
-    api(`/api/admin/sites/${siteId}/optimizations?target_id=${tax.id}`).then(({ ok, json }) => ok && setEvents(json.optimizations || []));
+    api(`/api/admin/sites/${siteId}/optimizations?target_id=${tax.id}&limit=100`).then(({ ok, json }) => { setLoading(false); if (ok) setEvents(json.optimizations || []); });
   }, [siteId, api, tax.id]);
-  const isImg = (v?: string) => typeof v === "string" && /^https?:\/\//.test(v);
   return (
-    <div className="fixed inset-0 z-50 flex justify-end bg-black/60">
-      <div className="h-full w-full max-w-xl overflow-y-auto border-l border-zinc-800 bg-zinc-950 p-6">
-        <div className="mb-4 flex items-center justify-between">
-          <h2 className="font-semibold">Historique: {tax.name}</h2>
-          <button onClick={onClose} className="text-zinc-400 hover:text-zinc-100"><Undo2 size={18} /></button>
-        </div>
-        {events.length === 0 && <p className="text-sm text-zinc-500">Aucun evenement.</p>}
-        <div className="space-y-3">
-          {events.map((e) => (
-            <div key={e.id} className="rounded-lg border border-zinc-800 bg-zinc-900/40 p-3">
-              <div className="mb-1 flex items-center justify-between">
-                <span className="text-sm text-zinc-200">{e.kind}</span>
-                <span className="text-xs text-zinc-500">{new Date(e.done_at).toLocaleString()} · {e.source}</span>
-              </div>
-              {e.note && <p className="mb-2 text-xs text-zinc-500">{e.note}</p>}
-              <div className="grid grid-cols-2 gap-2 text-xs">
-                <div>
-                  <p className="mb-1 text-zinc-500">Avant</p>
-                  {isImg(e.before_value) ? <img src={e.before_value} alt="" className="rounded" /> : <p className="line-clamp-4 text-zinc-400">{e.before_value || "-"}</p>}
+    <Drawer title="Historique des modifications" subtitle={tax.name} onClose={onClose} maxWidth="max-w-2xl">
+      {loading ? <Spinner /> : events.length === 0 ? (
+        <EmptyState>Aucune modification enregistree pour cette categorie. Des que tu cliques sur &quot;Regenerer image&quot;, &quot;Generer version optimisee&quot; ou que tu pousses en live, ca apparaitra ici.</EmptyState>
+      ) : (
+        <ol className="space-y-3">
+          {events.map((e) => {
+            const meta = TAX_KIND_META[e.kind] || { label: e.kind, cls: "text-zinc-400" };
+            return (
+              <li key={e.id} className="rounded-xl border border-white/[0.07] bg-white/[0.02] p-3">
+                <div className="mb-1.5 flex items-center justify-between gap-2">
+                  <span className={cn("text-sm font-medium", meta.cls)}>{meta.label}</span>
+                  <span className="flex items-center gap-2 text-[11px] text-zinc-500">
+                    <span className={cn("rounded px-1.5 py-0.5", e.source === "ai" ? "bg-purple-500/15 text-purple-300" : e.source === "system" ? "bg-white/[0.06] text-zinc-400" : "bg-white/10 text-zinc-200")}>{e.source}</span>
+                    {relativeTime(e.done_at)}
+                  </span>
                 </div>
-                <div>
-                  <p className="mb-1 text-zinc-500">Apres</p>
-                  {isImg(e.after_value) ? <img src={e.after_value} alt="" className="rounded" /> : <p className="line-clamp-4 text-zinc-400">{e.after_value || "-"}</p>}
+                {e.note && <p className="mb-2 text-xs italic text-zinc-500">{e.note}</p>}
+                <div className="grid grid-cols-2 gap-3 text-xs">
+                  <div>
+                    <p className="eyebrow mb-1">Avant</p>
+                    {isImageUrl(e.before_value)
+                      // eslint-disable-next-line @next/next/no-img-element
+                      ? <img src={e.before_value} alt="" className="max-h-24 rounded-md" />
+                      : <p className="line-clamp-3 text-zinc-400">{e.before_value || <span className="italic text-zinc-600">(vide)</span>}</p>}
+                  </div>
+                  <div>
+                    <p className="eyebrow mb-1">Apres</p>
+                    {isImageUrl(e.after_value)
+                      // eslint-disable-next-line @next/next/no-img-element
+                      ? <img src={e.after_value} alt="" className="max-h-24 rounded-md" />
+                      : <p className="line-clamp-3 text-emerald-300">{e.after_value || <span className="italic text-zinc-600">(vide)</span>}</p>}
+                  </div>
                 </div>
-              </div>
-            </div>
-          ))}
-        </div>
-      </div>
-    </div>
+              </li>
+            );
+          })}
+        </ol>
+      )}
+    </Drawer>
   );
 }
 
@@ -1841,14 +2085,14 @@ function ProfilTab({ siteId, api, setMsg, onSaved }: { siteId: string; api: ApiF
   );
 }
 
-const IMAGE_PRESETS_UI = [
-  { id: "icon-lineart", label: "Icon line-art", model: "fal-ai/flux/schnell", cost: 0.003, desc: "Icone monoligne fond sombre, glow blanc." },
-  { id: "warm-cosy", label: "Warm cosy", model: "fal-ai/flux/schnell", cost: 0.003, desc: "Photo chaleureuse, lumiere naturelle, terracotta." },
-  { id: "business-editorial", label: "Business editorial", model: "fal-ai/flux/dev", cost: 0.025, desc: "Photo business moderne, sharp focus. B2B." },
-  { id: "photo-real-premium", label: "Photo-real premium 4K", model: "fal-ai/flux-pro/v1.1", cost: 0.04, desc: "Ultra-realiste haut de gamme. Luxe, lifestyle." },
-  { id: "abstract-minimal", label: "Abstract minimal", model: "fal-ai/flux/schnell", cost: 0.003, desc: "Formes geometriques, palettes douces. Tech, SaaS." },
-  { id: "symbolic-icon", label: "Symbolic icon studio", model: "fal-ai/flux/schnell", cost: 0.003, desc: "Un objet centre, lumiere studio. Sobre." },
-  { id: "vibrant-flat", label: "Vibrant flat illustration", model: "fal-ai/flux/dev", cost: 0.025, desc: "Illustration plate, couleurs vives. SaaS." },
+const IMAGE_PRESETS_UI: { id: string; label: string; model: string; cost: number; desc: string; Icon: typeof Palette; color: string }[] = [
+  { id: "icon-lineart", label: "Icon line-art", model: "fal-ai/flux/schnell", cost: 0.003, desc: "Icone monoligne sur fond sombre, glow blanc.", Icon: Palette, color: "text-sky-300" },
+  { id: "warm-cosy", label: "Warm cosy", model: "fal-ai/flux/schnell", cost: 0.003, desc: "Photo chaleureuse, lumiere naturelle, terracotta.", Icon: Coffee, color: "text-amber-300" },
+  { id: "business-editorial", label: "Business editorial", model: "fal-ai/flux/dev", cost: 0.025, desc: "Photo business moderne, sharp focus. B2B, conseil, juridique.", Icon: Briefcase, color: "text-blue-300" },
+  { id: "photo-real-premium", label: "Photo-real premium 4K", model: "fal-ai/flux-pro/v1.1", cost: 0.04, desc: "Photo ultra-realiste haut de gamme. Luxury, lifestyle, premium.", Icon: Camera, color: "text-violet-300" },
+  { id: "abstract-minimal", label: "Abstract minimal", model: "fal-ai/flux/schnell", cost: 0.003, desc: "Formes geometriques, palettes douces. Tech, SaaS, conceptuel.", Icon: Shapes, color: "text-emerald-300" },
+  { id: "symbolic-icon", label: "Symbolic icon studio", model: "fal-ai/flux/schnell", cost: 0.003, desc: "Un seul objet centre, lumiere studio. Visuels sobres conceptuels.", Icon: Target, color: "text-rose-300" },
+  { id: "vibrant-flat", label: "Vibrant flat illustration", model: "fal-ai/flux/dev", cost: 0.025, desc: "Illustration plate, couleurs vives. Tech grand public, SaaS.", Icon: Brush, color: "text-fuchsia-300" },
 ];
 
 function ImageTab({ siteId, site, api, setMsg }: { siteId: string; site: any; api: ApiFn; setMsg: (s: string | null) => void }) {
@@ -1879,70 +2123,75 @@ function ImageTab({ siteId, site, api, setMsg }: { siteId: string; site: any; ap
     setBusy("save" + (sample.preset_id || "custom"));
     const payload = sample.preset_id ? { preset_id: sample.preset_id } : { custom_style_hint: customHint, custom_model: sample.model, custom_label: sample.label };
     const { ok, json } = await api(`/api/admin/sites/${siteId}/save-image-style`, { method: "POST", body: JSON.stringify(payload) });
-    setBusy(null); setMsg(ok ? `Style par defaut: ${json.saved.image_style_label}` : `Erreur: ${json.error}`);
+    setBusy(null); setMsg(ok ? `Style par defaut: ${json.saved?.image_style_label ?? "ok"}` : `Erreur: ${json.error}`);
   }
 
   const totalCost = samples.reduce((a, s) => a + (s.cost_usd || 0), 0);
 
   return (
-    <div className="space-y-4">
-      <div className={cardCls}>
-        <div className="mb-2 flex items-center justify-between">
-          <h3 className="font-medium">Image Lab, onboarding visuel</h3>
+    <div className="space-y-5">
+      <div className="card-base">
+        <div className="mb-3 flex flex-wrap items-start justify-between gap-2">
+          <div>
+            <h3 className="text-sm font-semibold text-zinc-100">Image Lab, onboarding visuel</h3>
+            <p className="mt-1 text-xs text-zinc-500">Teste les styles d&apos;image candidat pour ce site, compare cote-a-cote et sauve le winner.</p>
+          </div>
           {savedStyle ? (
-            <span className="flex items-center gap-1 rounded-full bg-emerald-500/15 px-2 py-0.5 text-xs text-emerald-300"><Check size={11} /> Defaut: {savedStyle}</span>
+            <span className="inline-flex items-center gap-1.5 rounded-full bg-emerald-500/15 px-2.5 py-1 text-xs text-emerald-300"><Check size={12} /> Default actuel : {savedStyle}</span>
           ) : (
-            <span className="rounded-full bg-amber-500/10 px-2 py-0.5 text-xs text-amber-300">Aucun style sauvegarde</span>
+            <span className="rounded-full bg-amber-500/10 px-2.5 py-1 text-xs text-amber-300">Aucun style sauvegarde pour ce site</span>
           )}
         </div>
-        <input value={topic} onChange={(e) => setTopic(e.target.value)} className={inputCls} placeholder="Sujet sample (section H2 fictive)" />
+        <label className="eyebrow mb-1 block">Sujet sample (section H2 fictive pour tester)</label>
+        <input value={topic} onChange={(e) => setTopic(e.target.value)} className="input-base" placeholder="ex: Article wall clock" />
       </div>
 
       <div className="grid gap-3 md:grid-cols-2 lg:grid-cols-3">
         {IMAGE_PRESETS_UI.map((p) => (
-          <div key={p.id} className={cardCls}>
-            <div className="mb-1 flex items-center justify-between">
-              <ImageIcon size={18} className="text-sky-300" />
+          <div key={p.id} className="card-base flex flex-col">
+            <div className="mb-2 flex items-start justify-between">
+              <p.Icon size={22} className={p.color} />
               <span className="text-[10px] text-zinc-500">{p.model.split("/").slice(-1)[0]} · ${p.cost}</span>
             </div>
-            <p className="font-medium text-zinc-100">{p.label}</p>
-            <p className="mb-3 min-h-[34px] text-xs text-zinc-500">{p.desc}</p>
-            <button onClick={() => genPreset(p.id, p.label)} disabled={busy === p.id} className={ghostBtn}>
+            <p className="text-sm font-medium text-zinc-100">{p.label}</p>
+            <p className="mb-3 mt-0.5 min-h-[40px] text-xs text-zinc-500">{p.desc}</p>
+            <button onClick={() => genPreset(p.id, p.label)} disabled={busy === p.id} className="btn-ghost btn-sm mt-auto">
               {busy === p.id ? <Loader2 size={12} className="animate-spin" /> : <ImageIcon size={12} />} Generer sample
             </button>
           </div>
         ))}
       </div>
 
-      <div className={cardCls}>
-        <h3 className="mb-2 font-medium">Style custom</h3>
-        <textarea value={customHint} onChange={(e) => setCustomHint(e.target.value)} rows={2} className={`${inputCls} mb-2`} placeholder="Decris le style (min 10 caracteres)" />
-        <div className="flex gap-2">
-          <select value={customModel} onChange={(e) => setCustomModel(e.target.value)} className={inputCls}>
+      <div className="card-base">
+        <h3 className="mb-2 text-sm font-semibold text-zinc-100">Style custom</h3>
+        <textarea value={customHint} onChange={(e) => setCustomHint(e.target.value)} rows={3} className="input-base mb-2" placeholder="Decris le style (min 10 caracteres)" />
+        <div className="flex flex-wrap gap-2">
+          <select value={customModel} onChange={(e) => setCustomModel(e.target.value)} className="input-base flex-1">
             <option value="fal-ai/flux/schnell">flux/schnell ($0.003)</option>
             <option value="fal-ai/flux/dev">flux/dev ($0.025)</option>
             <option value="fal-ai/flux-pro/v1.1">flux-pro v1.1 ($0.04)</option>
             <option value="fal-ai/flux-pro">flux-pro ($0.05)</option>
           </select>
-          <button onClick={genCustom} disabled={busy === "custom" || customHint.trim().length < 10} className={primaryBtn}>
-            {busy === "custom" ? <Loader2 size={16} className="animate-spin" /> : <ImageIcon size={16} />} Generer custom
+          <button onClick={genCustom} disabled={busy === "custom" || customHint.trim().length < 10} className="btn-primary">
+            {busy === "custom" ? <Loader2 size={15} className="animate-spin" /> : <ImageIcon size={15} />} Generer custom
           </button>
         </div>
       </div>
 
       {samples.length > 0 && (
         <div>
-          <div className="mb-2 flex items-center justify-between">
-            <h3 className="font-medium">Samples generes ({samples.length})</h3>
-            <span className="text-xs text-emerald-300">Cout total: ${totalCost.toFixed(3)}</span>
+          <div className="mb-3 flex items-center justify-between">
+            <h3 className="text-sm font-semibold text-zinc-100">Samples generes ({samples.length})</h3>
+            <span className="text-xs text-emerald-300">Cout total : ${totalCost.toFixed(3)}</span>
           </div>
           <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-3">
             {samples.map((s, i) => (
-              <div key={i} className={cardCls}>
-                <img src={s.url} alt="" className="mb-2 aspect-video w-full rounded object-cover" />
+              <div key={i} className="card-base">
+                {/* eslint-disable-next-line @next/next/no-img-element */}
+                <img src={s.url} alt="" className="mb-2 aspect-video w-full rounded-lg object-cover" />
                 <p className="text-xs text-zinc-300">{s.label}</p>
                 <p className="mb-2 text-[10px] text-zinc-500">{s.model} · ${s.cost_usd}</p>
-                <button onClick={() => saveDefault(s)} disabled={busy === "save" + (s.preset_id || "custom")} className="w-full rounded-lg bg-emerald-500/15 px-3 py-1.5 text-xs text-emerald-300 hover:bg-emerald-500/25">
+                <button onClick={() => saveDefault(s)} disabled={busy === "save" + (s.preset_id || "custom")} className="w-full rounded-lg bg-emerald-500/15 px-3 py-1.5 text-xs font-medium text-emerald-300 transition hover:bg-emerald-500/25 disabled:opacity-40">
                   Sauver comme defaut
                 </button>
               </div>
@@ -1954,11 +2203,25 @@ function ImageTab({ siteId, site, api, setMsg }: { siteId: string; site: any; ap
   );
 }
 
-const OPTIM_KINDS = [
-  "meta_description", "meta_title", "product_description", "product_seo_meta", "collection_description",
-  "collection_image", "collection_optimized_draft", "collection_pushed_live", "image_alt", "internal_link",
-  "schema_markup", "redirect", "article_generated", "article_refreshed", "scro_injection_pushed", "product_reverted", "other",
+const OPTIM_KIND_OPTIONS: { value: string; label: string; Icon: typeof FileText }[] = [
+  { value: "meta_description", label: "Meta description", Icon: FileText },
+  { value: "meta_title", label: "Meta title SEO", Icon: Tag },
+  { value: "product_description", label: "Fiche produit reecrite", Icon: ShoppingBag },
+  { value: "product_seo_meta", label: "SEO produit (h1, breadcrumb)", Icon: Search },
+  { value: "collection_description", label: "Page categorie optimisee", Icon: BookOpen },
+  { value: "collection_image", label: "Image categorie", Icon: ImageIcon },
+  { value: "collection_optimized_draft", label: "Categorie : draft optimise", Icon: Sparkles },
+  { value: "collection_pushed_live", label: "Categorie poussee live", Icon: UploadCloud },
+  { value: "image_alt", label: "Alt text image", Icon: ImageIcon },
+  { value: "internal_link", label: "Lien interne ajoute", Icon: Link2 },
+  { value: "schema_markup", label: "Schema markup JSON-LD", Icon: FileText },
+  { value: "redirect", label: "Redirection 301", Icon: Undo2 },
+  { value: "article_generated", label: "Article genere", Icon: FileText },
+  { value: "article_refreshed", label: "Article refresh", Icon: RefreshCw },
+  { value: "product_reverted", label: "Produit restaure", Icon: Undo2 },
+  { value: "other", label: "Autre optimisation", Icon: Settings },
 ];
+const OPTIM_KIND_MAP = Object.fromEntries(OPTIM_KIND_OPTIONS.map((o) => [o.value, o]));
 const TARGET_TYPES = ["product", "collection", "article", "page", "site"];
 
 function HistoryTab({ siteId, site, api, setMsg }: { siteId: string; site: any; api: ApiFn; setMsg: (s: string | null) => void }) {
@@ -1966,18 +2229,17 @@ function HistoryTab({ siteId, site, api, setMsg }: { siteId: string; site: any; 
   const [counters, setCounters] = useState<Record<string, number>>({});
   const [total, setTotal] = useState(0);
   const [fKind, setFKind] = useState("");
-  const [fType, setFType] = useState("");
   const [showLogger, setShowLogger] = useState(false);
   const [copied, setCopied] = useState(false);
+  const [expanded, setExpanded] = useState<Set<string>>(new Set());
   const [form, setForm] = useState<any>({ kind: "other", target_type: "site", target_id: "", target_title: "", target_url: "", before_value: "", after_value: "", note: "" });
 
   const load = useCallback(async () => {
     const qs = new URLSearchParams();
     if (fKind) qs.set("kind", fKind);
-    if (fType) qs.set("target_type", fType);
     const { ok, json } = await api(`/api/admin/sites/${siteId}/optimizations?${qs}`);
     if (ok) { setItems(json.optimizations || []); setCounters(json.counters || {}); setTotal(json.total || 0); }
-  }, [siteId, api, fKind, fType]);
+  }, [siteId, api, fKind]);
   useEffect(() => { load(); }, [load]);
 
   async function save() {
@@ -1994,59 +2256,110 @@ function HistoryTab({ siteId, site, api, setMsg }: { siteId: string; site: any; 
     navigator.clipboard?.writeText(url); setCopied(true); setTimeout(() => setCopied(false), 2000);
   }
   const set = (k: string, v: string) => setForm((f: any) => ({ ...f, [k]: v }));
+  const toggleExp = (id: string) => setExpanded((s) => { const n = new Set(s); if (n.has(id)) n.delete(id); else n.add(id); return n; });
 
   return (
-    <div className="space-y-4">
-      <div className="flex items-center justify-between">
-        <p className="text-sm text-zinc-400">Log de tout ce qui a ete touche sur ce site ({total}).</p>
-        <div className="flex gap-2">
-          <button onClick={() => setShowLogger((v) => !v)} className={ghostBtn}><Plus size={12} /> Ajouter manuelle</button>
+    <div className="space-y-5">
+      <div className="flex flex-wrap items-end justify-between gap-3">
+        <div>
+          <div className="eyebrow">Log d&apos;optimisations</div>
+          <div className="mt-1 flex items-baseline gap-2">
+            <span className="text-3xl font-semibold tracking-tight text-zinc-100">{total}</span>
+            <span className="text-sm text-zinc-500">enregistrees</span>
+          </div>
+        </div>
+        <div className="flex items-center gap-2">
+          <button onClick={load} className="btn-icon" aria-label="Rafraichir"><RefreshCw size={15} /></button>
           {site?.client_view_token && (
-            <button onClick={copyPortal} className={ghostBtn}>{copied ? <Check size={12} className="text-emerald-400" /> : <ExternalLink size={12} />} Lien portail</button>
+            <button onClick={copyPortal} className="btn-ghost">{copied ? <Check size={14} className="text-emerald-400" /> : <Link2 size={14} />} {copied ? "Copie" : "Lien portail"}</button>
           )}
+          <button onClick={() => setShowLogger((v) => !v)} className="btn-primary"><Plus size={15} /> Logger une optim</button>
         </div>
       </div>
 
-      <div className="flex flex-wrap gap-2">
-        {Object.entries(counters).filter(([, v]) => v > 0).map(([k, v]) => (
-          <button key={k} onClick={() => setFKind(fKind === k ? "" : k)} className={`rounded-full border px-2 py-0.5 text-[11px] ${fKind === k ? "border-emerald-600 text-emerald-300" : "border-zinc-700 text-zinc-400"}`}>{k}: {v}</button>
-        ))}
-      </div>
-
-      {showLogger && (
-        <div className={`${cardCls} space-y-2`}>
-          <div className="grid grid-cols-2 gap-2">
-            <select value={form.kind} onChange={(e) => set("kind", e.target.value)} className={inputCls}>{OPTIM_KINDS.map((k) => <option key={k} value={k}>{k}</option>)}</select>
-            <select value={form.target_type} onChange={(e) => set("target_type", e.target.value)} className={inputCls}>{TARGET_TYPES.map((k) => <option key={k} value={k}>{k}</option>)}</select>
-            <input value={form.target_title} onChange={(e) => set("target_title", e.target.value)} className={inputCls} placeholder="Titre cible" />
-            <input value={form.target_url} onChange={(e) => set("target_url", e.target.value)} className={inputCls} placeholder="URL cible" />
-          </div>
-          <textarea value={form.before_value} onChange={(e) => set("before_value", e.target.value)} rows={2} className={inputCls} placeholder="Avant" />
-          <textarea value={form.after_value} onChange={(e) => set("after_value", e.target.value)} rows={2} className={inputCls} placeholder="Apres" />
-          <textarea value={form.note} onChange={(e) => set("note", e.target.value)} rows={1} className={inputCls} placeholder="Note" />
-          <button onClick={save} className={primaryBtn}><Check size={14} /> Enregistrer</button>
+      {Object.entries(counters).filter(([, v]) => v > 0).length > 0 && (
+        <div className="flex flex-wrap gap-1.5">
+          {Object.entries(counters).filter(([, v]) => v > 0).map(([k, v]) => {
+            const meta = OPTIM_KIND_MAP[k];
+            const Icon = meta?.Icon || Settings;
+            return (
+              <button key={k} onClick={() => setFKind(fKind === k ? "" : k)} className={cn("pill", fKind === k && "pill-active")}>
+                <Icon size={12} /> {meta?.label || k} <span className="opacity-70">{v}</span>
+              </button>
+            );
+          })}
         </div>
       )}
 
-      <div className="space-y-2">
-        {items.length === 0 && <p className="text-sm text-zinc-500">Aucune optimisation.</p>}
-        {items.map((o) => (
-          <div key={o.id} className="rounded-lg border border-zinc-800 bg-zinc-900/40 p-3">
-            <div className="flex items-center justify-between">
-              <span className="flex items-center gap-2 text-sm text-zinc-200">
-                {o.target_title || o.kind}
-                <span className={`rounded px-1.5 text-[10px] ${o.source === "ai" ? "bg-purple-950/40 text-purple-300" : o.source === "system" ? "bg-zinc-800 text-zinc-400" : "bg-zinc-700 text-zinc-200"}`}>{o.source}</span>
-              </span>
-              <div className="flex items-center gap-2">
-                <span className="text-xs text-zinc-500">{new Date(o.done_at).toLocaleString()}</span>
-                <button onClick={() => del(o.id)} className="text-zinc-500 hover:text-red-400"><Trash2 size={13} /></button>
-              </div>
+      {showLogger && (
+        <div className="card-base space-y-2.5">
+          <div className="grid gap-2.5 sm:grid-cols-2">
+            <div>
+              <label className="eyebrow mb-1 block">Type d&apos;optim</label>
+              <select value={form.kind} onChange={(e) => set("kind", e.target.value)} className="input-base">{OPTIM_KIND_OPTIONS.map((k) => <option key={k.value} value={k.value}>{k.label}</option>)}</select>
             </div>
-            <p className="text-xs text-zinc-500">{o.kind} · {o.target_type}{o.note ? ` · ${o.note}` : ""}</p>
-            {o.target_url && <a href={o.target_url} target="_blank" rel="noreferrer" className="text-xs text-emerald-400">Voir</a>}
+            <div>
+              <label className="eyebrow mb-1 block">Cible</label>
+              <select value={form.target_type} onChange={(e) => set("target_type", e.target.value)} className="input-base">{TARGET_TYPES.map((k) => <option key={k} value={k}>{k}</option>)}</select>
+            </div>
+            <input value={form.target_title} onChange={(e) => set("target_title", e.target.value)} className="input-base" placeholder="Titre cible" />
+            <input value={form.target_url} onChange={(e) => set("target_url", e.target.value)} className="input-base" placeholder="URL cible" />
           </div>
-        ))}
-      </div>
+          <textarea value={form.before_value} onChange={(e) => set("before_value", e.target.value)} rows={2} maxLength={20000} className="input-base" placeholder="Avant" />
+          <textarea value={form.after_value} onChange={(e) => set("after_value", e.target.value)} rows={2} maxLength={20000} className="input-base" placeholder="Apres" />
+          <textarea value={form.note} onChange={(e) => set("note", e.target.value)} rows={1} maxLength={2000} className="input-base" placeholder="Note" />
+          <div className="flex gap-2">
+            <button onClick={save} className="btn-primary"><Check size={14} /> Enregistrer</button>
+            <button onClick={() => setShowLogger(false)} className="btn-ghost">Annuler</button>
+          </div>
+        </div>
+      )}
+
+      {items.length === 0 ? (
+        <EmptyState>Aucune optimisation pour le moment. Clique sur &quot;Logger une optim&quot; ou laisse le pipeline IA generer.</EmptyState>
+      ) : (
+        <div className="space-y-2">
+          {items.map((o) => {
+            const meta = OPTIM_KIND_MAP[o.kind];
+            const Icon = meta?.Icon || Settings;
+            const open = expanded.has(o.id);
+            const hasDiff = o.before_value || o.after_value;
+            return (
+              <div key={o.id} className="card-base p-3">
+                <div className="flex items-start justify-between gap-3">
+                  <div className="flex min-w-0 items-start gap-2.5">
+                    <Icon size={15} className="mt-0.5 shrink-0 text-zinc-500" />
+                    <div className="min-w-0">
+                      <div className="flex flex-wrap items-center gap-2">
+                        <span className="truncate text-sm text-zinc-200">{o.target_title || meta?.label || o.kind}</span>
+                        <span className="rounded bg-white/[0.06] px-1.5 py-0.5 text-[10px] text-zinc-500">{o.target_type}</span>
+                        <span className={cn("rounded px-1.5 py-0.5 text-[10px]", o.source === "ai" ? "bg-purple-500/15 text-purple-300" : o.source === "system" ? "bg-white/[0.06] text-zinc-400" : "bg-white/10 text-zinc-200")}>{o.source}</span>
+                      </div>
+                      <p className="mt-0.5 text-xs text-zinc-500">{meta?.label || o.kind}{o.note ? ` · ${o.note}` : ""}</p>
+                      {o.target_url && <a href={o.target_url} target="_blank" rel="noreferrer" className="text-xs text-emerald-400 hover:text-emerald-300">Voir la cible</a>}
+                    </div>
+                  </div>
+                  <div className="flex shrink-0 items-center gap-2">
+                    <span className="text-[11px] text-zinc-600">{relativeTime(o.done_at)}</span>
+                    <button onClick={() => del(o.id)} className="text-zinc-600 hover:text-red-400"><Trash2 size={13} /></button>
+                  </div>
+                </div>
+                {hasDiff && (
+                  <button onClick={() => toggleExp(o.id)} className="mt-2 inline-flex items-center gap-1 text-[11px] text-zinc-500 hover:text-zinc-300">
+                    <ChevronRight size={12} className={cn("transition", open && "rotate-90")} /> {open ? "Masquer" : "Avant / Apres"}
+                  </button>
+                )}
+                {open && hasDiff && (
+                  <div className="mt-2 grid grid-cols-2 gap-3 text-xs">
+                    <div><p className="eyebrow mb-1">Avant</p><p className="whitespace-pre-wrap break-words text-zinc-500">{o.before_value || "-"}</p></div>
+                    <div><p className="eyebrow mb-1">Apres</p><p className="whitespace-pre-wrap break-words text-emerald-300">{o.after_value || "-"}</p></div>
+                  </div>
+                )}
+              </div>
+            );
+          })}
+        </div>
+      )}
     </div>
   );
 }
