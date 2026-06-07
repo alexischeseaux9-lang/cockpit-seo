@@ -53,19 +53,52 @@ const itemSchema = z.object({
   target_blog_hint: z.string().nullable().optional(),
 });
 const enqueueSchema = z.object({
-  // Deux formes acceptees : mots-cles simples OU items riches (Roadmap bulk).
+  // Trois formes : mots-cles simples, items riches (Roadmap bulk), ou un update_article (Blog).
   keywords: z.array(z.string().min(1)).optional(),
   items: z.array(itemSchema).optional(),
   priority: z.number().int().optional(),
+  update: z
+    .object({ target_external_id: z.string().min(1), target_title: z.string().optional() })
+    .optional(),
 });
 
-// POST: empile des jobs generate_article (simple ou bulk riche)
+// POST: empile des jobs (generate_article simple/bulk, ou update_article depuis Blog)
 export async function POST(req: NextRequest, { params }: { params: { siteId: string } }) {
   if (!isAdmin(req)) return unauthorized();
   const body = await req.json().catch(() => null);
   const parsed = enqueueSchema.safeParse(body);
   if (!parsed.success) {
     return NextResponse.json({ error: parsed.error.flatten() }, { status: 400 });
+  }
+
+  // Forme update_article (un article a rafraichir, empile dans la file)
+  if (parsed.data.update) {
+    const supabase = getServiceClient();
+    const { target_external_id, target_title } = parsed.data.update;
+    // Evite les doublons en file pour le meme article.
+    const { data: existing } = await supabase
+      .from("site_jobs")
+      .select("id")
+      .eq("site_id", params.siteId)
+      .eq("kind", "update_article")
+      .eq("target_external_id", target_external_id)
+      .in("status", ["pending", "in_progress"])
+      .maybeSingle();
+    if (existing) return NextResponse.json({ enqueued: 0, already_queued: true, id: existing.id });
+    const { data, error } = await supabase
+      .from("site_jobs")
+      .insert({
+        site_id: params.siteId,
+        kind: "update_article",
+        status: "pending",
+        target_external_id,
+        target_title: target_title ?? null,
+        priority: 8,
+      })
+      .select("id")
+      .maybeSingle();
+    if (error) return NextResponse.json({ error: error.message }, { status: 500 });
+    return NextResponse.json({ enqueued: 1, id: data?.id });
   }
   const items: { keyword: string; brief?: string | null; priority?: number; target_blog_hint?: string | null }[] =
     parsed.data.items && parsed.data.items.length

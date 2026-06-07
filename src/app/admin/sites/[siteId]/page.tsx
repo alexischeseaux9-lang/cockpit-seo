@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import {
   ArrowLeft, RefreshCw, Loader2, Play, PlayCircle, Plus, ListPlus, FileText,
@@ -287,78 +287,227 @@ function monthsSince(iso: string): number {
   return (Date.now() - new Date(iso).getTime()) / (30 * 86_400_000);
 }
 
+const SEO_TITLE_MAX = 155;
+const SEO_DESC_MAX = 255;
+const SEO_TITLE_IDEAL_MIN = 30;
+const SEO_DESC_IDEAL_MIN = 80;
+
+function SeoRow({ label, value, max, idealMin }: { label: string; value: string | null; max: number; idealMin: number }) {
+  const has = typeof value === "string" && value.length > 0;
+  const len = has ? value!.length : 0;
+  let Icon = CheckCircle2, color = "text-emerald-400";
+  if (value == null) { Icon = Clock; color = "text-zinc-600"; }
+  else if (!has || len > max) { Icon = AlertCircle; color = "text-red-400"; }
+  else if (len < idealMin) { Icon = Clock; color = "text-amber-400"; }
+  return (
+    <div className="flex items-start justify-between gap-3">
+      <div className="min-w-0">
+        <span className="text-zinc-500">{label}</span>
+        <p className="truncate text-zinc-300">{value == null ? <span className="text-zinc-600">non lu via l&apos;API Shopify</span> : value || <span className="text-red-400">manquant</span>}</p>
+      </div>
+      <span className={cn("flex shrink-0 items-center gap-1 tabular-nums", color)}>
+        <Icon size={12} /> {value == null ? "-" : `${len} / ${max}`}
+      </span>
+    </div>
+  );
+}
+
+function BlogStatusBadge({ published, stale }: { published: boolean; stale: boolean }) {
+  if (stale) return <span className="rounded bg-amber-500/15 px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wide text-amber-300">A actualiser</span>;
+  if (!published) return <span className="rounded bg-white/10 px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wide text-zinc-400">Brouillon</span>;
+  return <span className="rounded bg-emerald-500/15 px-1.5 py-0.5 text-[10px] font-medium uppercase tracking-wide text-emerald-300">Publie</span>;
+}
+
 function BlogTab({ siteId, site, api, setMsg }: { siteId: string; site: any; api: ApiFn; setMsg: (s: string | null) => void }) {
   const [posts, setPosts] = useState<any[]>([]);
+  const [jobs, setJobs] = useState<any[]>([]);
+  const [counts, setCounts] = useState<Record<string, number>>({ pending: 0, in_progress: 0 });
   const [busy, setBusy] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [filter, setFilter] = useState<"all" | "stale" | "draft">("all");
+  const [expanded, setExpanded] = useState<Set<string>>(new Set());
 
-  const load = useCallback(async () => {
-    setLoading(true);
+  const loadPosts = useCallback(async () => {
     const { ok, json } = await api(`/api/admin/sites/${siteId}/posts`);
-    setLoading(false);
     if (ok) setPosts(json.posts || []); else setMsg(json.error || "Erreur lecture articles");
   }, [siteId, api, setMsg]);
+  const loadJobs = useCallback(async () => {
+    const { ok, json } = await api(`/api/admin/sites/${siteId}/jobs`);
+    if (ok) { setJobs(json.jobs || []); if (json.counts) setCounts(json.counts); }
+  }, [siteId, api]);
+  const load = useCallback(async () => {
+    setLoading(true);
+    await Promise.all([loadPosts(), loadJobs()]);
+    setLoading(false);
+  }, [loadPosts, loadJobs]);
   useEffect(() => { load(); }, [load]);
 
-  async function update(post: any) {
-    setBusy(post.external_id); setMsg("Refresh de l'article en cours (1 a 2 min, images preservees)...");
-    const { ok, json } = await api(`/api/admin/sites/${siteId}/blog-archive/refresh-one`, {
+  const updateJobs = jobs.filter((j) => j.kind === "update_article");
+  const activeUpdates = updateJobs.filter((j) => j.status === "pending" || j.status === "in_progress");
+  const recentUpdates = updateJobs.filter((j) => j.status === "done" || j.status === "error").slice(0, 5);
+  const queuedIds = new Set(activeUpdates.map((j) => j.target_external_id));
+  const hasRunning = jobs.some((j) => j.status === "in_progress");
+
+  useEffect(() => {
+    if (!hasRunning) return;
+    const id = setInterval(() => { loadJobs(); }, 3000);
+    return () => clearInterval(id);
+  }, [hasRunning, loadJobs]);
+  const prevRunning = useRef(0);
+  useEffect(() => {
+    const n = activeUpdates.filter((j) => j.status === "in_progress").length;
+    if (prevRunning.current > 0 && n === 0) loadPosts();
+    prevRunning.current = n;
+  }, [jobs, loadPosts, activeUpdates]);
+
+  async function enqueueUpdate(post: any) {
+    setBusy(post.external_id);
+    const { ok, json } = await api(`/api/admin/sites/${siteId}/jobs`, {
       method: "POST",
-      body: JSON.stringify({ shopify_article_id: post.external_id, target_title: post.title }),
+      body: JSON.stringify({ update: { target_external_id: post.external_id, target_title: post.title } }),
     });
-    setBusy(null); setMsg(ok ? "Article rafraichi." : `Echec: ${json.error}`); load();
+    setBusy(null);
+    setMsg(ok ? (json.already_queued ? "Article deja en file." : "Mise a jour ajoutee a la file.") : `Erreur: ${json.error}`);
+    if (ok) loadJobs();
+  }
+  async function runJob(id: string) {
+    setBusy(id); setMsg("Mise a jour en cours (1 a 2 min, images preservees)...");
+    const { ok, json } = await api(`/api/admin/jobs/run`, { method: "POST", body: JSON.stringify({ job_id: id }) });
+    setBusy(null); setMsg(ok ? "Article rafraichi." : `Echec: ${json.error}`); loadJobs();
+  }
+  function toggle(id: string) {
+    setExpanded((s) => { const n = new Set(s); if (n.has(id)) n.delete(id); else n.add(id); return n; });
   }
 
-  const staleCount = posts.filter((p) => p.date && monthsSince(p.updated_at) >= 6).length;
+  const staleCount = posts.filter((p) => daysSince(p.updated_at) >= 180).length;
   const draftCount = posts.filter((p) => p.status !== "published").length;
+  const activeJobs = (counts.pending ?? 0) + (counts.in_progress ?? 0);
   const shown = posts.filter((p) =>
-    filter === "all" ? true : filter === "stale" ? monthsSince(p.updated_at) >= 6 : p.status !== "published"
+    filter === "all" ? true : filter === "stale" ? daysSince(p.updated_at) >= 180 : p.status !== "published",
   );
 
-  const KPI = ({ label, value, hint }: { label: string; value: string; hint?: string }) => (
-    <div className={cardCls}><div className="text-[11px] uppercase tracking-wider text-zinc-500">{label}</div><div className="mt-1 text-2xl font-semibold text-zinc-100">{value}</div>{hint && <div className="text-xs text-zinc-500">{hint}</div>}</div>
-  );
+  if (loading) return <Spinner label="Lecture des articles depuis Shopify..." />;
 
-  if (loading) return <p className="text-sm text-zinc-400"><Loader2 size={14} className="inline animate-spin" /> Lecture des articles depuis Shopify...</p>;
+  const platformLabel = platformMeta(site?.platform).label;
 
   return (
     <div className="space-y-5">
-      <div className="grid grid-cols-2 gap-3 lg:grid-cols-4">
-        <KPI label="Articles total" value={String(posts.length)} hint={`${draftCount} brouillon(s)`} />
-        <KPI label="A actualiser" value={String(staleCount)} hint="> 6 mois sans update" />
-        <KPI label="Quota auto" value={`${site?.daily_post_quota ?? 0} / j`} hint={`${(site?.daily_post_quota ?? 0) * 30}/mois max`} />
-        <KPI label="Quota refresh" value={`${site?.daily_update_quota ?? 0} / j`} hint="onglet Archive" />
+      {/* KPIs */}
+      <div className="flex items-center justify-between">
+        <div className="grid flex-1 grid-cols-2 gap-3 lg:grid-cols-4">
+          <Kpi label="Articles total" value={posts.length} hint={`${draftCount} brouillon(s)`} />
+          <Kpi label="A actualiser" value={staleCount} hint="plus de 6 mois sans update" tone={staleCount > 0 ? "warn" : "default"} />
+          <Kpi label="En file d'attente" value={activeJobs} hint="jobs pending + in_progress" tone={activeJobs > 0 ? "accent" : "default"} />
+          <Kpi label="Quota auto" value={`${site?.daily_post_quota ?? 0} / j`} hint={`${(site?.daily_post_quota ?? 0) * 30}/mois max`} />
+        </div>
+        <button onClick={load} className="btn-ghost ml-3 shrink-0"><RefreshCw size={14} /> Tout rafraichir</button>
       </div>
 
-      <div className="flex items-center gap-2">
-        {(["all", "stale", "draft"] as const).map((fl) => (
-          <button key={fl} onClick={() => setFilter(fl)} className={`rounded-full border px-2.5 py-1 text-xs ${filter === fl ? "border-emerald-600 text-emerald-300" : "border-zinc-700 text-zinc-400"}`}>
-            {fl === "all" ? `Tous (${posts.length})` : fl === "stale" ? `A actualiser (${staleCount})` : `Brouillons (${draftCount})`}
-          </button>
-        ))}
-        <button onClick={load} className={`${ghostBtn} ml-auto`}><RefreshCwTab /> Rafraichir</button>
-      </div>
-
-      <div className="space-y-2">
-        {shown.length === 0 && <p className="text-sm text-zinc-500">Aucun article dans ce filtre.</p>}
-        {shown.map((p) => {
-          const months = monthsSince(p.updated_at);
-          return (
-            <div key={p.external_id} className="flex items-center justify-between rounded-lg border border-zinc-800 bg-zinc-900/40 p-3">
-              <div className="min-w-0">
-                <a href={p.url} target="_blank" rel="noreferrer" className="truncate text-sm text-zinc-200 hover:text-emerald-400">{p.title}</a>
-                <p className="text-xs text-zinc-500">
-                  {p.status === "published" ? "publie" : "brouillon"} · maj il y a {Math.round(months * 30)}j
-                  {months >= 6 && <span className="text-amber-400"> · a actualiser</span>}
-                </p>
+      <div className="grid gap-6 lg:grid-cols-[340px_1fr]">
+        {/* Queue */}
+        <div className="space-y-4">
+          <div className="card-base">
+            <h3 className="mb-3 text-sm font-semibold text-zinc-100">File de mises a jour</h3>
+            {activeUpdates.length === 0 ? (
+              <p className="text-xs text-zinc-600">Aucune file de mise a jour. Clique sur &quot;Mettre a jour&quot; sur un article a droite.</p>
+            ) : (
+              <div className="space-y-2">
+                {activeUpdates.map((j) => (
+                  <div key={j.id} className="rounded-lg border border-white/[0.06] bg-black/20 p-2.5">
+                    <div className="flex items-center gap-2">
+                      <StatusDot status={j.status} pulse={j.status === "in_progress"} />
+                      <span className="min-w-0 flex-1 truncate text-xs text-zinc-300">{j.target_title || j.target_external_id}</span>
+                    </div>
+                    {j.status === "in_progress" ? (
+                      <p className="mt-1 pl-4 text-[11px] text-amber-300">Pipeline en cours ({platformLabel})...</p>
+                    ) : (
+                      <button onClick={() => runJob(j.id)} disabled={busy === j.id} className="btn-primary btn-sm mt-2 w-full">
+                        {busy === j.id ? <Loader2 size={12} className="animate-spin" /> : <Play size={12} />} Lancer maintenant
+                      </button>
+                    )}
+                  </div>
+                ))}
               </div>
-              <button onClick={() => update(p)} disabled={busy === p.external_id} className={ghostBtn}>
-                {busy === p.external_id ? <Loader2 size={12} className="animate-spin" /> : <Play size={12} />} Mettre a jour
-              </button>
+            )}
+          </div>
+          {recentUpdates.length > 0 && (
+            <div className="card-base">
+              <h3 className="mb-3 text-sm font-semibold text-zinc-100">Mises a jour recentes</h3>
+              <div className="space-y-2">
+                {recentUpdates.map((j) => (
+                  <div key={j.id} className="flex items-center gap-2 text-xs">
+                    <StatusDot status={j.status} />
+                    <span className="min-w-0 flex-1 truncate text-zinc-400">{j.target_title || j.target_external_id}</span>
+                  </div>
+                ))}
+              </div>
             </div>
-          );
-        })}
+          )}
+        </div>
+
+        {/* Articles list */}
+        <div>
+          <div className="mb-1">
+            <h3 className="text-sm font-semibold text-zinc-100">Articles sur {platformLabel}</h3>
+            <p className="text-xs text-zinc-500">Lus en direct depuis l&apos;API, clique sur un article pour le mettre a jour.</p>
+          </div>
+          <div className="mb-3 mt-3 flex flex-wrap items-center gap-1.5">
+            {(["all", "stale", "draft"] as const).map((fl) => (
+              <button key={fl} onClick={() => setFilter(fl)} className={cn("pill", filter === fl && "pill-active")}>
+                {fl === "all" ? "Tous" : fl === "stale" ? "A actualiser" : "Brouillons"}{" "}
+                <span className="opacity-70">{fl === "all" ? posts.length : fl === "stale" ? staleCount : draftCount}</span>
+              </button>
+            ))}
+          </div>
+
+          <div className="space-y-2">
+            {shown.length === 0 && <EmptyState>Aucun article dans ce filtre.</EmptyState>}
+            {shown.map((p) => {
+              const stale = daysSince(p.updated_at) >= 180;
+              const open = expanded.has(p.external_id);
+              const queued = queuedIds.has(p.external_id);
+              return (
+                <div key={p.external_id} className="card-base card-hover p-4">
+                  <div className="flex items-start gap-3">
+                    <button onClick={() => toggle(p.external_id)} className="mt-0.5 text-zinc-500 hover:text-zinc-200">
+                      <ChevronRight size={16} className={cn("transition", open && "rotate-90")} />
+                    </button>
+                    <div className="min-w-0 flex-1">
+                      <div className="flex flex-wrap items-center gap-2">
+                        <h4 className="truncate text-sm font-medium text-zinc-100">{p.title}</h4>
+                        <BlogStatusBadge published={p.status === "published"} stale={stale} />
+                      </div>
+                      <p className="mt-0.5 text-xs text-zinc-500">
+                        Maj {relativeTime(p.updated_at)} · Pub {formatDate(p.date)}
+                        {p.tags?.length ? ` · Tags ${p.tags.slice(0, 3).join(", ")}${p.tags.length > 3 ? ` +${p.tags.length - 3}` : ""}` : ""}
+                      </p>
+                      {open && (
+                        <div className="mt-3 space-y-2.5 border-t border-white/[0.06] pt-3 text-xs">
+                          <SeoRow label="Titre H1" value={p.title} max={SEO_TITLE_MAX} idealMin={SEO_TITLE_IDEAL_MIN} />
+                          <SeoRow label="Meta title (SEO)" value={p.seo_title} max={SEO_TITLE_MAX} idealMin={SEO_TITLE_IDEAL_MIN} />
+                          <SeoRow label="Meta description" value={p.seo_description} max={SEO_DESC_MAX} idealMin={SEO_DESC_IDEAL_MIN} />
+                          {p.summary && (
+                            <div>
+                              <span className="text-zinc-500">Resume</span>
+                              <p className="mt-0.5 line-clamp-3 text-zinc-400">{p.summary}</p>
+                            </div>
+                          )}
+                          <a href={p.url} target="_blank" rel="noreferrer" className="inline-flex items-center gap-1 text-emerald-400 hover:text-emerald-300">
+                            Voir l&apos;article <ExternalLink size={11} />
+                          </a>
+                        </div>
+                      )}
+                    </div>
+                    <button onClick={() => enqueueUpdate(p)} disabled={busy === p.external_id || queued} className="btn-ghost btn-sm shrink-0">
+                      {busy === p.external_id ? <Loader2 size={12} className="animate-spin" /> : queued ? <Hourglass size={12} /> : <PlayCircle size={12} />}
+                      {queued ? "En file" : "Mettre a jour"}
+                    </button>
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </div>
       </div>
     </div>
   );
@@ -1172,9 +1321,67 @@ function HistoryDrawer({ siteId, api, tax, onClose }: { siteId: string; api: Api
 }
 
 const POSITION_OPTS = [
-  { v: "0.2", l: "20% de l'article" }, { v: "0.4", l: "40%" }, { v: "0.5", l: "50% (sweet spot)" },
-  { v: "0.6", l: "60%" }, { v: "0.8", l: "80%" }, { v: "end", l: "Fin de l'article" },
+  { v: "0.2", l: "20% de l'article" }, { v: "0.4", l: "40% de l'article" }, { v: "0.5", l: "50% (newsletter sweet spot)" },
+  { v: "0.6", l: "60% de l'article" }, { v: "0.8", l: "80% de l'article" }, { v: "end", l: "Fin de l'article" },
 ];
+
+function ScroField({ label, value, onChange, placeholder, full }: { label: string; value?: string; onChange: (v: string) => void; placeholder?: string; full?: boolean }) {
+  return (
+    <div className={full ? "sm:col-span-2" : ""}>
+      <label className="eyebrow mb-1 block">{label}</label>
+      <input value={value || ""} onChange={(e) => onChange(e.target.value)} placeholder={placeholder} className="input-base" />
+    </div>
+  );
+}
+function PerksField({ label, value, onChange, placeholder, max = 5 }: { label: string; value?: string[]; onChange: (v: string[]) => void; placeholder?: string; max?: number }) {
+  return (
+    <div className="sm:col-span-2">
+      <label className="eyebrow mb-1 block">{label}</label>
+      <textarea value={(value || []).join("\n")} onChange={(e) => onChange(e.target.value.split("\n").slice(0, max))} rows={4} className="input-base text-xs" placeholder={placeholder} />
+    </div>
+  );
+}
+function HandleListEditor({ cfg, options, onChange, autoLabel, autoDisabled, autoDisabledHint, hideManual }: { cfg: any; options: any[]; onChange: (p: any) => void; autoLabel: string; autoDisabled?: boolean; autoDisabledHint?: string; hideManual?: boolean }) {
+  const handles: string[] = Array.isArray(cfg?.manual_handles) ? cfg.manual_handles : [];
+  const setHandle = (i: number, v: string) => { const next = [...handles]; next[i] = v; onChange({ manual_handles: next }); };
+  return (
+    <div className="space-y-2.5">
+      <div>
+        <label className="eyebrow mb-1 block">Titre de la section</label>
+        <input value={cfg?.title || ""} onChange={(e) => onChange({ title: e.target.value })} className="input-base" />
+      </div>
+      <label className="flex items-center gap-2 text-xs text-zinc-400">
+        <input type="checkbox" checked={!!cfg?.auto} disabled={autoDisabled} onChange={(e) => onChange({ auto: e.target.checked })} className="h-4 w-4 accent-emerald-500" />
+        {autoLabel}
+      </label>
+      {autoDisabled && autoDisabledHint && <p className="text-[11px] text-zinc-600">{autoDisabledHint}</p>}
+      {!cfg?.auto && !hideManual && (
+        <div className="space-y-1.5">
+          {[0, 1, 2].map((i) => (
+            <select key={i} value={handles[i] || ""} onChange={(e) => setHandle(i, e.target.value)} className="input-base font-mono text-xs">
+              <option value="">{`-- Slot #${i + 1} --`}</option>
+              {options.map((o: any) => <option key={o.handle} value={o.handle}>{o.title}</option>)}
+            </select>
+          ))}
+        </div>
+      )}
+      {!cfg?.auto && hideManual && (
+        <p className="text-[11px] text-zinc-600">Pour piocher des articles specifiques au lieu des 3 plus recents, utilise &quot;Auto-remplir&quot; en haut puis re-pick si besoin.</p>
+      )}
+    </div>
+  );
+}
+function ScroBlockCard({ icon, title, on, onToggle, children }: { icon: React.ReactNode; title: string; on: boolean; onToggle: () => void; children: React.ReactNode }) {
+  return (
+    <div className="rounded-xl border border-white/[0.07] bg-white/[0.02] p-4">
+      <div className="mb-3 flex items-center justify-between">
+        <h4 className="flex items-center gap-2 text-sm font-semibold text-zinc-100">{icon} {title}</h4>
+        <Toggle on={on} onClick={onToggle} />
+      </div>
+      {children}
+    </div>
+  );
+}
 
 function ScroTab({ siteId, api, setMsg }: { siteId: string; api: ApiFn; setMsg: (s: string | null) => void }) {
   const [config, setConfig] = useState<any>(null);
@@ -1236,137 +1443,192 @@ function ScroTab({ siteId, api, setMsg }: { siteId: string; api: ApiFn; setMsg: 
   }
   function removeBlock(i: number) { patch({ blocks: config.blocks.filter((_: any, j: number) => j !== i) }); }
 
-  if (!config || !catalog) return <p className="text-sm text-zinc-400"><Loader2 size={14} className="inline animate-spin" /> Chargement SCRO...</p>;
+  if (!config || !catalog) return <Spinner label="Chargement SCRO..." />;
   const br = catalog.branding || {};
   const sb = config.sidebar || {};
+  const lead = sb.lead_magnet || {};
+  const best = sb.bestsellers || {};
+  const cats = sb.top_categories || {};
+  const arts = sb.top_articles || {};
+  const author = sb.author || {};
   const productOpts = catalog.products || [];
   const collectionOpts = catalog.collections || [];
+  const blocks = config.blocks || [];
+  const pushStatusColor = config.last_push_status === "ok" ? "text-emerald-400" : config.last_push_status === "removed" ? "text-zinc-400" : "text-red-400";
 
   return (
-    <div className="space-y-5 pb-24">
-      <div className={cardCls}>
-        <div className="flex items-center justify-between">
+    <div className="space-y-5 pb-28">
+      {/* Header */}
+      <div className="card-base">
+        <div className="flex flex-wrap items-start justify-between gap-3">
           <div>
-            <h3 className="flex items-center gap-2 font-medium"><ShoppingBag size={16} className="text-amber-300" /> SCRO, blocs CRO dans le theme</h3>
-            <p className="mt-1 text-xs text-zinc-500">Injecte des cartes produit/collection + une sidebar dans tes articles. Push ecrit dans `sections/main-article.liquid`. Re-pushable, rollback en 1 clic.</p>
+            <h3 className="flex items-center gap-2 text-sm font-semibold text-zinc-100"><Sparkles size={16} className="text-amber-300" /> SCRO, blocs CRO dans les articles</h3>
+            <p className="mt-1 max-w-3xl text-xs leading-relaxed text-zinc-500">
+              Injecte jusqu&apos;a 5 cartes produit / collection a des positions fixes dans CHAQUE article de blog (20%, 40%, 60%, 80%, fin). Les couleurs viennent de ton voice_profile, le push ecrit dans sections/main-article.liquid de ton theme actif. Re-pushable n&apos;importe quand, rollback en 1 clic.
+            </p>
           </div>
-          <button onClick={() => patch({ inline_enabled: !config.inline_enabled })} className={`rounded-lg border px-3 py-1.5 text-sm ${config.inline_enabled ? "border-emerald-600 text-emerald-300" : "border-zinc-700 text-zinc-400"}`}>
-            Inline {config.inline_enabled ? "ON" : "OFF"}
-          </button>
+          <Toggle on={!!config.inline_enabled} onClick={() => patch({ inline_enabled: !config.inline_enabled })} labelOn="Active" labelOff="Desactive" />
         </div>
         {config.last_push_status && (
-          <p className="mt-3 text-xs text-zinc-500">
-            Dernier push : {config.last_pushed_at ? new Date(config.last_pushed_at).toLocaleString() : "-"} · statut{" "}
-            <span className={config.last_push_status === "ok" ? "text-emerald-400" : config.last_push_status === "removed" ? "text-zinc-400" : "text-red-400"}>{config.last_push_status}</span>
+          <p className="mt-3 flex items-center gap-1.5 text-xs text-zinc-500">
+            {config.last_push_status === "ok" ? <CheckCircle2 size={13} className="text-emerald-400" /> : config.last_push_status === "removed" ? <Undo2 size={13} /> : <AlertTriangle size={13} className="text-red-400" />}
+            Dernier push : {config.last_pushed_at ? formatDateTime(config.last_pushed_at) : "-"} · statut <span className={pushStatusColor}>{config.last_push_status}</span>
             {config.last_push_error ? ` · ${config.last_push_error}` : ""}
           </p>
         )}
       </div>
 
-      <div className={cardCls}>
-        <h3 className="mb-2 font-medium">Palette detectee</h3>
-        <div className="flex flex-wrap gap-3">
+      {/* Palette */}
+      <div className="card-base">
+        <h3 className="text-sm font-semibold text-zinc-100">Palette detectee</h3>
+        <p className="mb-3 mt-1 text-xs text-zinc-500">Auto depuis le voice_profile du site. Les boutons et accents des blocs CRO suivront ces couleurs.</p>
+        <div className="flex flex-wrap gap-4">
           {["accent", "accentDark", "cardBg", "border", "textDark", "ratingColor"].map((k) => (
             <div key={k} className="text-center">
-              <div className="h-8 w-8 rounded border border-zinc-700" style={{ background: br[k] }} />
-              <div className="mt-1 text-[10px] text-zinc-500">{k}</div>
+              <div className="h-9 w-9 rounded-md border border-white/10" style={{ background: br[k] || "#222" }} />
+              <div className="mt-1 font-mono text-[10px] text-zinc-500">{k}</div>
+              <div className="font-mono text-[10px] text-zinc-600">{br[k] || "-"}</div>
             </div>
           ))}
         </div>
       </div>
 
-      <div className={cardCls}>
+      {/* Inline blocks */}
+      <div className="card-base">
         <div className="mb-3 flex items-center justify-between">
-          <h3 className="font-medium">Blocs inline ({(config.blocks || []).length}/5)</h3>
-          <button onClick={addBlock} disabled={(config.blocks || []).length >= 5} className={ghostBtn}><Plus size={12} /> Ajouter</button>
+          <h3 className="text-sm font-semibold text-zinc-100">Blocs ({blocks.length}/5)</h3>
+          <button onClick={addBlock} disabled={blocks.length >= 5} className="btn-ghost btn-sm"><Plus size={13} /> Ajouter un bloc</button>
         </div>
+        {blocks.length === 0 ? (
+          <p className="text-sm text-zinc-600">Aucun bloc configure. Click &quot;Ajouter un bloc&quot; pour commencer.</p>
+        ) : (
+          <div className="space-y-3">
+            {blocks.map((b: any, i: number) => {
+              const opts = b.kind === "product" ? productOpts : collectionOpts;
+              const selected = opts.find((o: any) => o.handle === b.handle);
+              const posLabel = b.position === "end" ? "Fin de l'article" : `${Math.round(Number(b.position) * 100)}%`;
+              return (
+                <div key={i} className="rounded-xl border border-white/[0.07] bg-black/20 p-3">
+                  <div className="mb-2.5 flex items-center justify-between gap-2">
+                    <div className="flex min-w-0 items-center gap-2">
+                      <span className="rounded bg-amber-500/15 px-2 py-0.5 text-[10px] font-medium text-amber-300">Slot #{i + 1} · {posLabel}</span>
+                      {selected && <span className="truncate text-xs text-zinc-400">{selected.title}</span>}
+                    </div>
+                    <button onClick={() => removeBlock(i)} className="text-zinc-600 hover:text-red-400"><Trash2 size={14} /></button>
+                  </div>
+                  <div className="grid gap-2 text-xs md:grid-cols-2">
+                    <div>
+                      <label className="eyebrow mb-1 block">Position</label>
+                      <select value={String(b.position)} onChange={(e) => updateBlock(i, { position: e.target.value })} className="input-base">
+                        {POSITION_OPTS.map((o) => <option key={o.v} value={o.v}>{o.l}</option>)}
+                      </select>
+                    </div>
+                    <div>
+                      <label className="eyebrow mb-1 block">Type</label>
+                      <div className="flex gap-1.5">
+                        {[{ v: "product", l: "Produit", Icon: ShoppingBag }, { v: "collection", l: "Collection", Icon: FolderTree }].map((t) => (
+                          <button key={t.v} onClick={() => updateBlock(i, { kind: t.v, handle: "" })}
+                            className={cn("flex flex-1 items-center justify-center gap-1.5 rounded-lg border py-2 transition", b.kind === t.v ? "border-emerald-500/40 bg-emerald-500/[0.08] text-emerald-200" : "border-white/10 text-zinc-400 hover:border-white/20")}>
+                            <t.Icon size={13} /> {t.l}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                    <div className="md:col-span-2">
+                      <label className="eyebrow mb-1 block">{b.kind === "product" ? "Produit" : "Collection"} (handle Shopify)</label>
+                      <select value={b.handle} onChange={(e) => updateBlock(i, { handle: e.target.value })} className="input-base">
+                        <option value="">Choisir...</option>
+                        {opts.map((o: any) => <option key={o.handle} value={o.handle}>{o.title}</option>)}
+                      </select>
+                    </div>
+                    <ScroField label="Label / eyebrow (top de carte)" value={b.label} onChange={(v) => updateBlock(i, { label: v })} />
+                    <ScroField label="CTA (texte du bouton)" value={b.cta} onChange={(v) => updateBlock(i, { cta: v })} />
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        )}
+      </div>
+
+      {/* Sidebar 5 blocks */}
+      <div className="card-base">
+        <div className="mb-1 flex flex-wrap items-start justify-between gap-3">
+          <div>
+            <h3 className="flex items-center gap-2 text-sm font-semibold text-zinc-100"><FolderTree size={16} className="text-emerald-300" /> Sidebar 5 blocs (CRO/SEO)</h3>
+            <p className="mt-1 max-w-3xl text-xs leading-relaxed text-zinc-500">
+              Lead magnet, 3 bestsellers, 3 categories top vente, 3 articles, auteur/trust. Couleurs auto depuis le branding. Icones generees par Claude pour matcher la persona. Mobile : passe en bas du contenu.
+            </p>
+          </div>
+          <Toggle on={!!config.sidebar_enabled} onClick={() => patch({ sidebar_enabled: !config.sidebar_enabled })} labelOn="Activee" labelOff="Desactivee" />
+        </div>
+        <div className="mb-4 mt-3 flex flex-wrap gap-2">
+          <button onClick={genIcons} disabled={busy === "icons"} className="btn-ghost btn-sm">{busy === "icons" ? <Loader2 size={13} className="animate-spin" /> : <Wand2 size={13} />} Generer mes icones (Claude)</button>
+          <button onClick={autoData} disabled={busy === "auto"} className="btn-ghost btn-sm">{busy === "auto" ? <Loader2 size={13} className="animate-spin" /> : <UploadCloud size={13} />} Auto-remplir (homepage + commandes 90j + articles recents)</button>
+        </div>
+
         <div className="space-y-3">
-          {(config.blocks || []).length === 0 && <p className="text-sm text-zinc-500">Aucun bloc. Clique Ajouter.</p>}
-          {(config.blocks || []).map((b: any, i: number) => (
-            <div key={i} className="rounded-lg border border-zinc-800 bg-zinc-900/40 p-3">
-              <div className="mb-2 flex items-center justify-between">
-                <span className="rounded bg-amber-950/40 px-2 py-0.5 text-[10px] text-amber-300">Slot {i + 1}</span>
-                <button onClick={() => removeBlock(i)} className="text-zinc-500 hover:text-red-400"><Trash2 size={14} /></button>
-              </div>
-              <div className="grid grid-cols-2 gap-2 text-xs">
-                <select value={String(b.position)} onChange={(e) => updateBlock(i, { position: e.target.value })} className={inputCls}>
-                  {POSITION_OPTS.map((o) => <option key={o.v} value={o.v}>{o.l}</option>)}
-                </select>
-                <select value={b.kind} onChange={(e) => updateBlock(i, { kind: e.target.value, handle: "" })} className={inputCls}>
-                  <option value="product">Produit</option><option value="collection">Collection</option>
-                </select>
-                <select value={b.handle} onChange={(e) => updateBlock(i, { handle: e.target.value })} className={`${inputCls} col-span-2`}>
-                  <option value="">Choisir...</option>
-                  {(b.kind === "product" ? productOpts : collectionOpts).map((o: any) => <option key={o.handle} value={o.handle}>{o.title}</option>)}
-                </select>
-                <input value={b.label} onChange={(e) => updateBlock(i, { label: e.target.value })} className={inputCls} placeholder="Label" />
-                <input value={b.cta} onChange={(e) => updateBlock(i, { cta: e.target.value })} className={inputCls} placeholder="CTA" />
-              </div>
+          <ScroBlockCard icon={<Gift size={15} className="text-amber-300" />} title="1. Lead magnet" on={!!lead.enabled} onToggle={() => setSidebar("lead_magnet", { enabled: !lead.enabled })}>
+            <div className="grid gap-2.5 md:grid-cols-2">
+              <ScroField label="Titre" value={lead.title} onChange={(v) => setSidebar("lead_magnet", { title: v })} />
+              <ScroField label="Code promo" value={lead.promo_code} onChange={(v) => setSidebar("lead_magnet", { promo_code: v })} placeholder="NAMASTE" />
+              <ScroField label="Sous-titre" value={lead.subtitle} onChange={(v) => setSidebar("lead_magnet", { subtitle: v })} full />
+              <ScroField label="CTA bouton" value={lead.cta_text} onChange={(v) => setSidebar("lead_magnet", { cta_text: v })} />
+              <ScroField label="CTA URL" value={lead.cta_url} onChange={(v) => setSidebar("lead_magnet", { cta_url: v })} placeholder="/contact" />
+              <ScroField label="Image URL" value={lead.image_url} onChange={(v) => setSidebar("lead_magnet", { image_url: v })} placeholder="https://cdn.shopify.com/..." full />
+              <PerksField label="Perks / benefices (1 par ligne, max 5)" value={lead.perks} onChange={(v) => setSidebar("lead_magnet", { perks: v })} placeholder={"Nouveaux articles\nPromos en avant-premiere"} />
             </div>
-          ))}
+          </ScroBlockCard>
+
+          <ScroBlockCard icon={<Crown size={15} className="text-amber-300" />} title="2. Top 3 bestsellers (produits)" on={!!best.enabled} onToggle={() => setSidebar("bestsellers", { enabled: !best.enabled })}>
+            <HandleListEditor cfg={best} options={productOpts} onChange={(p) => setSidebar("bestsellers", p)} autoLabel="Auto (best-sellers Shopify natifs)" />
+          </ScroBlockCard>
+
+          <ScroBlockCard icon={<FolderTree size={15} className="text-sky-300" />} title="3. Top 3 categories" on={!!cats.enabled} onToggle={() => setSidebar("top_categories", { enabled: !cats.enabled })}>
+            <HandleListEditor cfg={cats} options={collectionOpts} onChange={(p) => setSidebar("top_categories", p)} autoLabel="Auto (calcule via commandes Shopify)" autoDisabled autoDisabledHint="Le calcul auto se fait via 'Auto-remplir' ci-dessus (orders API)." />
+          </ScroBlockCard>
+
+          <ScroBlockCard icon={<BookOpen size={15} className="text-purple-300" />} title="4. Top 3 articles" on={!!arts.enabled} onToggle={() => setSidebar("top_articles", { enabled: !arts.enabled })}>
+            <HandleListEditor cfg={arts} options={[]} onChange={(p) => setSidebar("top_articles", p)} autoLabel="Auto (3 plus recents du blog courant)" hideManual />
+          </ScroBlockCard>
+
+          <ScroBlockCard icon={<UserCircle size={15} className="text-rose-300" />} title="5. Auteur / brand / trust" on={!!author.enabled} onToggle={() => setSidebar("author", { enabled: !author.enabled })}>
+            <div className="grid gap-2.5 md:grid-cols-2">
+              <ScroField label="Nom" value={author.name} onChange={(v) => setSidebar("author", { name: v })} placeholder="(vide = persona du voice_profile)" />
+              <ScroField label="Role" value={author.role} onChange={(v) => setSidebar("author", { role: v })} placeholder="Buddhist Monk & Author" />
+              <ScroField label="Image URL" value={author.image_url} onChange={(v) => setSidebar("author", { image_url: v })} full />
+              <div className="sm:col-span-2">
+                <label className="eyebrow mb-1 block">Bio</label>
+                <textarea value={author.bio || ""} onChange={(e) => setSidebar("author", { bio: e.target.value })} rows={3} className="input-base" />
+              </div>
+              <PerksField label="Trust badges (1 par ligne)" value={author.trust_badges} onChange={(v) => setSidebar("author", { trust_badges: v })} max={6} placeholder={"-5% premiere commande\nOffres exclusives"} />
+            </div>
+          </ScroBlockCard>
         </div>
       </div>
 
-      <div className={cardCls}>
-        <div className="mb-3 flex items-center justify-between">
-          <h3 className="font-medium">Sidebar (5 blocs)</h3>
-          <button onClick={() => patch({ sidebar_enabled: !config.sidebar_enabled })} className={`rounded-lg border px-3 py-1.5 text-sm ${config.sidebar_enabled ? "border-emerald-600 text-emerald-300" : "border-zinc-700 text-zinc-400"}`}>
-            Sidebar {config.sidebar_enabled ? "ON" : "OFF"}
-          </button>
-        </div>
-        <div className="mb-3 flex flex-wrap gap-2">
-          <button onClick={genIcons} disabled={busy === "icons"} className={ghostBtn}>{busy === "icons" ? <Loader2 size={12} className="animate-spin" /> : <Wand2 size={12} />} Generer icones</button>
-          <button onClick={autoData} disabled={busy === "auto"} className={ghostBtn}>{busy === "auto" ? <Loader2 size={12} className="animate-spin" /> : <UploadCloud size={12} />} Auto-remplir</button>
-        </div>
-        <div className="space-y-3 text-xs">
-          {[
-            { k: "lead_magnet", label: "1. Lead magnet" },
-            { k: "bestsellers", label: "2. Best-sellers" },
-            { k: "top_categories", label: "3. Categories" },
-            { k: "top_articles", label: "4. Articles" },
-            { k: "author", label: "5. Auteur / trust" },
-          ].map(({ k, label }) => (
-            <div key={k} className="rounded-lg border border-zinc-800 bg-zinc-900/40 p-3">
-              <label className="flex items-center justify-between">
-                <span className="font-medium text-zinc-200">{label}</span>
-                <input type="checkbox" checked={!!sb[k]?.enabled} onChange={(e) => setSidebar(k, { enabled: e.target.checked })} />
-              </label>
-              {k === "lead_magnet" && sb[k]?.enabled && (
-                <div className="mt-2 grid grid-cols-2 gap-2">
-                  <input value={sb[k].title || ""} onChange={(e) => setSidebar(k, { title: e.target.value })} className={inputCls} placeholder="Titre" />
-                  <input value={sb[k].promo_code || ""} onChange={(e) => setSidebar(k, { promo_code: e.target.value })} className={inputCls} placeholder="Code promo" />
-                  <input value={sb[k].cta_text || ""} onChange={(e) => setSidebar(k, { cta_text: e.target.value })} className={inputCls} placeholder="CTA texte" />
-                  <input value={sb[k].cta_url || ""} onChange={(e) => setSidebar(k, { cta_url: e.target.value })} className={inputCls} placeholder="CTA url" />
-                </div>
-              )}
-              {k === "author" && sb[k]?.enabled && (
-                <div className="mt-2 grid grid-cols-2 gap-2">
-                  <input value={sb[k].name || ""} onChange={(e) => setSidebar(k, { name: e.target.value })} className={inputCls} placeholder="Nom (vide = persona)" />
-                  <input value={sb[k].role || ""} onChange={(e) => setSidebar(k, { role: e.target.value })} className={inputCls} placeholder="Role" />
-                </div>
-              )}
-            </div>
-          ))}
-        </div>
-      </div>
-
-      <div className={cardCls}>
-        <h3 className="mb-2 font-medium">Theme cible</h3>
-        <select value={config.theme_id || ""} onChange={(e) => patch({ theme_id: e.target.value || null })} className={inputCls}>
+      {/* Theme picker */}
+      <div className="card-base">
+        <h3 className="mb-2 text-sm font-semibold text-zinc-100">Theme cible</h3>
+        <select value={config.theme_id || ""} onChange={(e) => patch({ theme_id: e.target.value || null })} className="input-base">
           <option value="">Theme actif (auto)</option>
           {(catalog.themes || []).map((t: any) => <option key={t.id} value={t.id}>{t.name} ({t.role})</option>)}
         </select>
         {catalog.errors?.themes && <p className="mt-2 text-xs text-red-400">{catalog.errors.themes}</p>}
       </div>
 
-      <div className="fixed bottom-4 left-1/2 z-10 flex w-[min(90%,56rem)] -translate-x-1/2 items-center justify-between rounded-lg border border-zinc-800 bg-zinc-950/95 p-3 backdrop-blur">
-        <span className="text-xs text-zinc-400">{dirty ? "Modifications non sauvegardees" : "Tout est sauvegarde"}</span>
+      {/* Sticky actions */}
+      <div className="fixed bottom-4 left-1/2 z-20 flex w-[min(92%,60rem)] -translate-x-1/2 items-center justify-between rounded-xl border border-white/10 bg-[var(--bg-elev)]/95 p-3 shadow-2xl shadow-black/40 backdrop-blur">
+        <span className={cn("flex items-center gap-1.5 text-xs", dirty ? "text-amber-300" : "text-zinc-500")}>
+          {dirty ? <AlertTriangle size={13} /> : <CheckCircle2 size={13} className="text-emerald-400" />}
+          {dirty ? "Modifications non sauvegardees" : "Tout est sauvegarde"}
+        </span>
         <div className="flex gap-2">
           {config.last_push_status === "ok" && (
-            <button onClick={removeScro} disabled={busy === "remove"} className={ghostBtn}>{busy === "remove" ? <Loader2 size={12} className="animate-spin" /> : <Undo2 size={12} />} Retirer</button>
+            <button onClick={removeScro} disabled={busy === "remove"} className="btn-ghost btn-sm">{busy === "remove" ? <Loader2 size={13} className="animate-spin" /> : <Undo2 size={13} />} Retirer du theme</button>
           )}
-          <button onClick={save} disabled={busy === "save" || !dirty} className={ghostBtn}>{busy === "save" ? <Loader2 size={12} className="animate-spin" /> : null} Sauvegarder</button>
-          <button onClick={push} disabled={busy === "push"} className={primaryBtn}>{busy === "push" ? <Loader2 size={14} className="animate-spin" /> : <Play size={14} />} Push theme</button>
+          <button onClick={save} disabled={busy === "save" || !dirty} className="btn-ghost btn-sm">{busy === "save" ? <Loader2 size={13} className="animate-spin" /> : null} Sauvegarder</button>
+          <button onClick={push} disabled={busy === "push"} className="btn-primary btn-sm">{busy === "push" ? <Loader2 size={13} className="animate-spin" /> : <PlayCircle size={13} />} Push sur le theme</button>
         </div>
       </div>
     </div>
