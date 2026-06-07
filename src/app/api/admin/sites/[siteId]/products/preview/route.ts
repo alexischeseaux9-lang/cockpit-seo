@@ -19,12 +19,12 @@ export async function GET(req: NextRequest, { params }: { params: { siteId: stri
   const supabase = getServiceClient();
   const { data: audit } = await supabase
     .from("site_product_audits")
-    .select("title, proposed_payload")
+    .select("title, proposed, proposed_payload")
     .eq("site_id", params.siteId)
     .eq("external_id", externalId)
     .maybeSingle();
 
-  const pp = (audit?.proposed_payload as any) || {};
+  const pp = (audit?.proposed || audit?.proposed_payload || {}) as any;
   const title = pp.title || audit?.title || "Preview";
   const body = pp.body_html || "<p>Aucune version optimisee.</p>";
 

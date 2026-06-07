@@ -2,7 +2,7 @@ import { getServiceClient } from "./supabase";
 import { decryptCredentials } from "./credentials";
 import { ensureValidToken, getDefaultBlogId, publishArticle, getArticle, updateArticleBody } from "./shopify";
 import { analyzeSerp } from "./serp";
-import { generateBrief, writeArticle, editArticle, generateImagePrompt, refreshArticle } from "./anthropic";
+import { generateBrief, writeArticle, editArticle, generateImagePrompt, refreshArticle, optimizeProductFull } from "./anthropic";
 import { generateCoverImage } from "./fal";
 import { assertNoAntiPatterns, assertPersonaIsolation } from "./guards";
 import { classifyError } from "./retry-classifier";
@@ -98,6 +98,25 @@ export async function runJob(jobId: string): Promise<{ ok: boolean; error?: stri
         completed_at: nowIso, updated_at: nowIso,
       }).eq("id", jobId);
       await supabase.from("sites").update({ last_published_at: nowIso, updated_at: nowIso }).eq("id", site.id);
+      return { ok: true };
+    }
+
+    // --- kind: optimize_product (Sonnet -> proposed) ---
+    if (job.kind === "optimize_product") {
+      const extId = job.target_external_id;
+      if (!extId) throw new Error("missing_target_external_id");
+      const { data: audit } = await supabase
+        .from("site_product_audits").select("*").eq("site_id", site.id).eq("external_id", extId).maybeSingle();
+      if (!audit) throw new Error("audit_row_not_found");
+      const accent = voice.branding_accent_hex || "#10b981";
+      const opt = await optimizeProductFull(audit.current_title || audit.title || "", audit.current_body_html || "", voice, accent);
+      const nowIso = new Date().toISOString();
+      await supabase.from("site_product_audits").update({
+        proposed: opt, proposed_quality: opt.quality_score, proposed_at: nowIso, status: "proposed", updated_at: nowIso,
+      }).eq("id", audit.id);
+      await supabase.from("site_jobs").update({
+        status: "done", output: { external_id: extId, quality: opt.quality_score }, completed_at: nowIso, updated_at: nowIso,
+      }).eq("id", jobId);
       return { ok: true };
     }
 

@@ -8,9 +8,13 @@ export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 export const maxDuration = 120;
 
-const schema = z.object({ external_id: z.string().min(1) });
+// Accepte external_id (gid) OU audit_id (uuid).
+const schema = z.object({ external_id: z.string().optional(), audit_id: z.string().optional() });
 
-// POST: pousse la version proposee d'un produit vers Shopify + log historique.
+function numericId(gidOrId: string): string {
+  return gidOrId.includes("/") ? gidOrId.split("/").pop() || gidOrId : gidOrId;
+}
+
 export async function POST(req: NextRequest, { params }: { params: { siteId: string } }) {
   if (!isAdmin(req)) return unauthorized();
   const body = await req.json().catch(() => null);
@@ -19,46 +23,42 @@ export async function POST(req: NextRequest, { params }: { params: { siteId: str
 
   try {
     const { supabase, shop, token } = await getSiteContext(params.siteId);
-    const { data: audit } = await supabase
-      .from("site_product_audits")
-      .select("*")
-      .eq("site_id", params.siteId)
-      .eq("external_id", parsed.data.external_id)
-      .single();
-    if (!audit?.proposed_payload) return NextResponse.json({ error: "no_proposal" }, { status: 404 });
+    let audit: any = null;
+    if (parsed.data.external_id) {
+      const r = await supabase.from("site_product_audits").select("*").eq("site_id", params.siteId).eq("external_id", parsed.data.external_id).maybeSingle();
+      audit = r.data;
+    } else if (parsed.data.audit_id) {
+      const r = await supabase.from("site_product_audits").select("*").eq("site_id", params.siteId).eq("id", parsed.data.audit_id).maybeSingle();
+      audit = r.data;
+    }
+    if (!audit) return NextResponse.json({ error: "audit_not_found" }, { status: 404 });
 
-    // Snapshot de l'original AVANT ecrasement (pour pouvoir annuler).
-    const original = await getProduct(shop, token, parsed.data.external_id);
+    const pp = (audit.proposed || audit.proposed_payload) as any;
+    if (!pp) return NextResponse.json({ error: "no_proposal" }, { status: 404 });
+    const shopMeta = pp.channel_meta?.shopify || {};
+    const pid = numericId(audit.external_id);
 
-    const pp = audit.proposed_payload as any;
-    // Supporte l'ancien shape (meta_title direct) et le V2 (channel_meta.shopify)
-    const shopifyMeta = pp.channel_meta?.shopify || {};
-    await updateProduct(shop, token, parsed.data.external_id, {
+    // Snapshot avant (pour revert)
+    const original = await getProduct(shop, token, pid);
+
+    await updateProduct(shop, token, pid, {
       title: pp.title,
       body_html: pp.body_html,
-      metaTitle: shopifyMeta.meta_title || pp.meta_title,
-      metaDescription: shopifyMeta.meta_description || pp.meta_description,
+      metaTitle: shopMeta.meta_title || pp.meta_title,
+      metaDescription: shopMeta.meta_description || pp.meta_description,
     });
 
     const now = new Date().toISOString();
-    await supabase
-      .from("site_product_audits")
-      .update({ status: "applied", applied_at: now, applied_revision: (audit.applied_revision || 0) + 1, updated_at: now })
-      .eq("id", audit.id);
+    await supabase.from("site_product_audits").update({
+      status: "applied", applied_at: now, applied_revision_meta: original ? { title: original.title, body_html: original.body_html } : null, updated_at: now,
+    }).eq("id", audit.id);
 
-    await logChange({
-      siteId: params.siteId,
-      kind: "product_optimized",
-      target_type: "product",
-      target_id: parsed.data.external_id,
-      target_title: pp.title,
-      before_value: audit.title,
-      after_value: pp.title,
-      before_meta: original ? { title: original.title, body_html: original.body_html } : undefined,
-      after_meta: { title: pp.title, body_html: pp.body_html },
-      note: "Fiche produit optimisee et poussee",
-      source: "ai",
-    });
+    // 3 logs distincts
+    await logChange({ siteId: params.siteId, kind: "product_description", target_type: "product", target_id: audit.external_id, target_title: pp.title, before_value: original?.title, after_value: pp.title, before_meta: original ? { body_html: original.body_html } : undefined, after_meta: { body_html: pp.body_html }, note: "Fiche produit reecrite", source: "ai" });
+    await logChange({ siteId: params.siteId, kind: "product_seo_meta", target_type: "product", target_id: audit.external_id, target_title: pp.title, after_value: `${shopMeta.meta_title || ""} | ${shopMeta.meta_description || ""}`, note: "Meta SEO produit", source: "ai" });
+    if (Array.isArray(pp.image_alts) && pp.image_alts.length) {
+      await logChange({ siteId: params.siteId, kind: "image_alt", target_type: "product", target_id: audit.external_id, target_title: pp.title, after_value: JSON.stringify(pp.image_alts), note: "Alts proposes", source: "ai" });
+    }
 
     return NextResponse.json({ ok: true });
   } catch (e) {

@@ -542,6 +542,7 @@ function ProductsTab({ siteId, api, setMsg }: { siteId: string; api: ApiFn; setM
   const [loading, setLoading] = useState(true);
   const [filter, setFilter] = useState("all");
   const [sel, setSel] = useState<Set<string>>(new Set());
+  const [drawer, setDrawer] = useState<any>(null);
   const pw = typeof window !== "undefined" ? localStorage.getItem(PW_KEY) || "" : "";
 
   const load = useCallback(async () => {
@@ -553,15 +554,15 @@ function ProductsTab({ siteId, api, setMsg }: { siteId: string; api: ApiFn; setM
   useEffect(() => { load(); }, [load]);
 
   async function auditAll() {
-    setBusy("auditall"); setMsg("Audit en masse (Haiku)...");
-    const { ok, json } = await api(`/api/admin/sites/${siteId}/products/audit-batch`, { method: "POST", body: JSON.stringify({ limit: 15 }) });
+    setBusy("auditall"); setMsg("Audit heuristique en masse...");
+    const { ok, json } = await api(`/api/admin/sites/${siteId}/products/audit-batch`, { method: "POST", body: JSON.stringify({ limit: 1500 }) });
     setBusy(null); setMsg(ok ? `${json.audited} produit(s) audites` : `Erreur: ${json.error}`); load();
   }
   async function optimizeSel() {
     if (!sel.size) return;
     setBusy("optsel"); setMsg(`Optimisation de ${sel.size} produit(s) (Sonnet)...`);
     const { ok, json } = await api(`/api/admin/sites/${siteId}/products/optimize-batch`, { method: "POST", body: JSON.stringify({ external_ids: Array.from(sel) }) });
-    setBusy(null); setMsg(ok ? `${json.optimized} optimise(s)` : `Erreur: ${json.error}`); setSel(new Set()); load();
+    setBusy(null); setMsg(ok ? `${json.optimized}/${json.queued} optimise(s)` : `Erreur: ${json.error}`); setSel(new Set()); load();
   }
   async function apply(id: string) {
     setBusy(id + "p"); setMsg("Application sur Shopify...");
@@ -576,6 +577,8 @@ function ProductsTab({ siteId, api, setMsg }: { siteId: string; api: ApiFn; setM
   const toggle = (id: string) => setSel((s) => { const n = new Set(s); if (n.has(id)) n.delete(id); else n.add(id); return n; });
 
   const shown = products.filter((p) => filter === "all" || p.status === filter);
+  const scored = products.filter((p) => p.audit_score != null);
+  const avg = scored.length ? Math.round(scored.reduce((a, p) => a + p.audit_score, 0) / scored.length) : 0;
   if (loading) return <p className="text-sm text-zinc-400"><Loader2 size={14} className="inline animate-spin" /> Chargement des produits Shopify...</p>;
 
   return (
@@ -594,6 +597,14 @@ function ProductsTab({ siteId, api, setMsg }: { siteId: string; api: ApiFn; setM
         </div>
       </div>
 
+      <div className="flex gap-4 text-xs text-zinc-500">
+        <span>{products.length} produits</span>
+        <span>Score moyen: {avg}/100</span>
+        <span>Need work: {products.filter((p) => p.status === "needs_work").length}</span>
+        <span>Proposes: {products.filter((p) => p.status === "proposed").length}</span>
+        <span>Appliques: {products.filter((p) => p.status === "applied").length}</span>
+      </div>
+
       {shown.length === 0 && <p className="text-sm text-zinc-500">Aucun produit dans ce filtre.</p>}
       {shown.map((p) => (
         <div key={p.external_id} className="flex items-center justify-between rounded-lg border border-zinc-800 bg-zinc-900/40 p-3">
@@ -602,16 +613,16 @@ function ProductsTab({ siteId, api, setMsg }: { siteId: string; api: ApiFn; setM
             {p.image && <img src={p.image} alt="" className="h-10 w-10 rounded object-cover" />}
             <div className="min-w-0">
               <p className="truncate text-sm text-zinc-200">{p.title}</p>
-              <div className="flex items-center gap-2"><Status status={p.status} />{p.audit_score != null && <span className="text-xs text-zinc-500">score {p.audit_score}</span>}</div>
+              <div className="flex flex-wrap items-center gap-2">
+                <Status status={p.status} />
+                {p.audit_score != null && <span className={`text-xs ${p.audit_score >= 80 ? "text-emerald-400" : p.audit_score >= 40 ? "text-amber-400" : "text-red-400"}`}>score {p.audit_score}</span>}
+                {(p.audit_issues || []).slice(0, 3).map((iss: string) => <span key={iss} className="rounded bg-red-950/40 px-1.5 text-[10px] text-red-300">{iss}</span>)}
+              </div>
             </div>
           </div>
           <div className="flex items-center gap-2">
-            {(p.status === "proposed" || p.status === "applied") && (
-              <a href={`/api/admin/sites/${siteId}/products/preview?external_id=${encodeURIComponent(p.external_id)}&pw=${encodeURIComponent(pw)}`} target="_blank" rel="noreferrer" className={ghostBtn}>
-                <ExternalLink size={12} /> Preview
-              </a>
-            )}
-            {(p.status === "proposed" || p.status === "applied") && (
+            <button onClick={() => setDrawer(p)} className={ghostBtn}><ExternalLink size={12} /> Detail</button>
+            {p.has_proposal && (
               <button onClick={() => apply(p.external_id)} disabled={busy === p.external_id + "p"} className={ghostBtn}>
                 {busy === p.external_id + "p" ? <Loader2 size={12} className="animate-spin" /> : <UploadCloud size={12} />} Appliquer
               </button>
@@ -624,6 +635,71 @@ function ProductsTab({ siteId, api, setMsg }: { siteId: string; api: ApiFn; setM
           </div>
         </div>
       ))}
+
+      {drawer && <ProductDrawer siteId={siteId} api={api} product={drawer} pw={pw} onClose={() => setDrawer(null)} />}
+    </div>
+  );
+}
+
+function ProductDrawer({ siteId, api, product, pw, onClose }: { siteId: string; api: ApiFn; product: any; pw: string; onClose: () => void }) {
+  const [data, setData] = useState<any>(null);
+  useEffect(() => {
+    api(`/api/admin/sites/${siteId}/products/proposed?external_id=${encodeURIComponent(product.external_id)}`).then(({ ok, json }) => ok && setData(json));
+  }, [siteId, api, product.external_id]);
+  const pp = data?.proposed;
+  const cm = pp?.channel_meta;
+  const cro = pp?.cro_signals;
+  const Diff = ({ label, a, b }: { label: string; a?: string; b?: string }) => (
+    <div className="grid grid-cols-2 gap-2 text-xs">
+      <div><p className="mb-1 text-zinc-500">{label} avant</p><p className="line-clamp-3 text-zinc-400">{a || "-"}</p></div>
+      <div><p className="mb-1 text-zinc-500">{label} apres</p><p className="line-clamp-3 text-emerald-300">{b || "-"}</p></div>
+    </div>
+  );
+  return (
+    <div className="fixed inset-0 z-50 flex justify-end bg-black/60">
+      <div className="h-full w-full max-w-2xl overflow-y-auto border-l border-zinc-800 bg-zinc-950 p-6">
+        <div className="mb-4 flex items-center justify-between">
+          <h2 className="truncate font-semibold">{product.title}</h2>
+          <button onClick={onClose} className="text-zinc-400 hover:text-zinc-100"><Undo2 size={18} /></button>
+        </div>
+        {!data && <p className="text-sm text-zinc-400"><Loader2 size={14} className="inline animate-spin" /> Chargement...</p>}
+        {data && (
+          <div className="space-y-4">
+            <div className="flex items-center gap-3 text-sm">
+              <span className={`${data.audit_score >= 80 ? "text-emerald-400" : data.audit_score >= 40 ? "text-amber-400" : "text-red-400"}`}>Score audit {data.audit_score}/100</span>
+              <Status status={data.status} />
+            </div>
+            {(data.audit_issues || []).length > 0 && (
+              <div className="flex flex-wrap gap-1">{data.audit_issues.map((i: string) => <span key={i} className="rounded bg-red-950/40 px-1.5 text-[10px] text-red-300">{i}</span>)}</div>
+            )}
+            {!pp && <p className="text-sm text-zinc-500">Pas encore de version optimisee. Selectionne le produit et clique Optimiser.</p>}
+            {pp && (
+              <>
+                <Diff label="Titre" a={data.current?.title} b={pp.title} />
+                <Diff label="Description" a={(data.current?.body_html || "").replace(/<[^>]+>/g, " ").slice(0, 200)} b={(pp.body_html || "").replace(/<[^>]+>/g, " ").slice(0, 200)} />
+                {cm && (
+                  <div className="grid gap-2 sm:grid-cols-3">
+                    {[["Shopify", cm.shopify], ["Google", cm.google_shopping], ["Meta Ads", cm.meta_ads]].map(([name, m]: any) => (
+                      <div key={name} className="rounded-lg border border-zinc-800 bg-zinc-900/40 p-2 text-[11px]">
+                        <p className="mb-1 font-medium text-zinc-300">{name}</p>
+                        <pre className="whitespace-pre-wrap break-words text-zinc-500">{JSON.stringify(m, null, 1)}</pre>
+                      </div>
+                    ))}
+                  </div>
+                )}
+                {cro && (
+                  <div className="flex flex-wrap gap-2">
+                    {Object.entries(cro).map(([k, v]) => (
+                      <span key={k} className={`rounded-full px-2 py-0.5 text-[10px] ${v ? "bg-emerald-500/15 text-emerald-300" : "bg-zinc-800 text-zinc-500"}`}>{k}</span>
+                    ))}
+                  </div>
+                )}
+                <iframe src={`/api/admin/sites/${siteId}/products/preview?external_id=${encodeURIComponent(product.external_id)}&pw=${encodeURIComponent(pw)}`} className="h-96 w-full rounded-lg border border-zinc-800 bg-white" />
+              </>
+            )}
+          </div>
+        )}
+      </div>
     </div>
   );
 }

@@ -81,6 +81,66 @@ export async function listProducts(shop: string, token: string, limit = 50): Pro
   }));
 }
 
+export type ShopifyProductDetailed = {
+  id: number;
+  gid: string;
+  title: string;
+  handle: string;
+  body_html: string;
+  image: string | null;
+  images: { src: string; alt: string | null }[];
+  vendor: string | null;
+  product_type: string | null;
+  tags: string[];
+  status: string;
+  published_at: string | null;
+};
+
+function parseNextPageInfo(linkHeader: string | null): string | null {
+  if (!linkHeader) return null;
+  const m = linkHeader.split(",").find((p) => p.includes('rel="next"'));
+  if (!m) return null;
+  const urlMatch = m.match(/<([^>]+)>/);
+  if (!urlMatch) return null;
+  const u = new URL(urlMatch[1]);
+  return u.searchParams.get("page_info");
+}
+
+// Fetch tous les produits (pagine via page_info) jusqu'a cap.
+export async function listProductsDetailed(shop: string, token: string, cap = 250): Promise<ShopifyProductDetailed[]> {
+  const host = shop.includes(".myshopify.com") ? shop : `${shop}.myshopify.com`;
+  const out: ShopifyProductDetailed[] = [];
+  let pageInfo: string | null = null;
+  for (let i = 0; i < 20 && out.length < cap; i++) {
+    const url = new URL(`${apiBase(shop)}/products.json`);
+    url.searchParams.set("limit", "250");
+    if (pageInfo) url.searchParams.set("page_info", pageInfo);
+    const res = await fetch(url.toString(), { headers: { "X-Shopify-Access-Token": token }, cache: "no-store" });
+    if (!res.ok) throw new Error(`shopify_products_failed:${res.status}`);
+    const data = await res.json();
+    for (const p of data.products || []) {
+      out.push({
+        id: p.id,
+        gid: `gid://shopify/Product/${p.id}`,
+        title: p.title,
+        handle: p.handle,
+        body_html: p.body_html || "",
+        image: p.image?.src || null,
+        images: (p.images || []).map((im: any) => ({ src: im.src, alt: im.alt ?? null })),
+        vendor: p.vendor || null,
+        product_type: p.product_type || null,
+        tags: (p.tags || "").split(",").map((t: string) => t.trim()).filter(Boolean),
+        status: p.status || "active",
+        published_at: p.published_at || null,
+      });
+      if (out.length >= cap) break;
+    }
+    pageInfo = parseNextPageInfo(res.headers.get("link"));
+    if (!pageInfo) break;
+  }
+  return out;
+}
+
 export async function getProduct(shop: string, token: string, productId: string | number): Promise<ShopifyProduct | null> {
   const res = await fetch(`${apiBase(shop)}/products/${productId}.json`, {
     headers: { "X-Shopify-Access-Token": token },

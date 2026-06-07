@@ -1,61 +1,46 @@
 import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import { isAdmin, unauthorized } from "@/lib/auth";
-import { getSiteContext } from "@/lib/site-context";
-import { listProducts } from "@/lib/shopify";
-import { optimizeProductFull } from "@/lib/anthropic";
+import { getServiceClient } from "@/lib/supabase";
+import { runJob } from "@/lib/job-runner";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 export const maxDuration = 300;
 
-const schema = z.object({ external_ids: z.array(z.string()).min(1).max(20) });
+// Accepte external_ids (gids) OU audit_ids (uuid).
+const schema = z.object({
+  external_ids: z.array(z.string()).optional(),
+  audit_ids: z.array(z.string()).optional(),
+});
 
-// Optimisation en masse (Sonnet) des produits selectionnes -> proposed_payload.
 export async function POST(req: NextRequest, { params }: { params: { siteId: string } }) {
   if (!isAdmin(req)) return unauthorized();
   const body = await req.json().catch(() => null);
   const parsed = schema.safeParse(body);
   if (!parsed.success) return NextResponse.json({ error: "bad_request" }, { status: 400 });
 
-  try {
-    const { supabase, shop, token, voice } = await getSiteContext(params.siteId);
-    const accent = voice.branding_accent_hex || "#10b981";
-    const products = await listProducts(shop, token, 100);
-    const byId = new Map(products.map((p) => [String(p.id), p]));
-
-    const started = Date.now();
-    let optimized = 0;
-    for (const extId of parsed.data.external_ids) {
-      if (Date.now() - started > 270_000) break;
-      const p = byId.get(extId);
-      if (!p) continue;
-      try {
-        const opt = await optimizeProductFull(p.title, p.body_html, voice, accent);
-        const now = new Date().toISOString();
-        await supabase.from("site_product_audits").upsert(
-          {
-            site_id: params.siteId,
-            external_id: extId,
-            handle: p.handle,
-            title: p.title,
-            current_title: p.title,
-            current_body_html: p.body_html,
-            status: "proposed",
-            quality_score: opt.quality_score,
-            proposed_payload: opt,
-            proposed_at: now,
-            updated_at: now,
-          },
-          { onConflict: "site_id,external_id" }
-        );
-        optimized++;
-      } catch {
-        // produit suivant
-      }
-    }
-    return NextResponse.json({ optimized });
-  } catch (e) {
-    return NextResponse.json({ error: e instanceof Error ? e.message : "error" }, { status: 500 });
+  const supabase = getServiceClient();
+  // resoudre audit_ids -> external_ids si besoin
+  let externalIds = parsed.data.external_ids || [];
+  if ((!externalIds.length) && parsed.data.audit_ids?.length) {
+    const { data } = await supabase.from("site_product_audits").select("external_id").in("id", parsed.data.audit_ids);
+    externalIds = (data || []).map((r) => r.external_id);
   }
+  if (!externalIds.length) return NextResponse.json({ error: "no_targets" }, { status: 400 });
+  externalIds = externalIds.slice(0, 20);
+
+  // cree les jobs optimize_product
+  const rows = externalIds.map((extId) => ({ site_id: params.siteId, kind: "optimize_product", status: "pending", target_external_id: extId }));
+  const { data: jobs } = await supabase.from("site_jobs").insert(rows).select("id");
+
+  // run inline avec budget temps
+  const started = Date.now();
+  let optimized = 0;
+  for (const j of jobs || []) {
+    if (Date.now() - started > 270_000) break;
+    const r = await runJob(j.id);
+    if (r.ok) optimized++;
+  }
+  return NextResponse.json({ ok: true, queued: jobs?.length || 0, optimized });
 }
