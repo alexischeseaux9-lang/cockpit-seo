@@ -19,23 +19,33 @@ export async function POST(req: NextRequest, { params }: { params: { siteId: str
 
   try {
     const { supabase, shop, token } = await getSiteContext(params.siteId);
-    const { data: log } = await supabase
-      .from("site_optimizations")
-      .select("before_meta")
+    // snapshot V3 stocke sur la ligne d'audit (applied_revision_meta), fallback log V2.
+    const { data: audit } = await supabase
+      .from("site_product_audits")
+      .select("applied_revision_meta")
       .eq("site_id", params.siteId)
-      .eq("target_id", parsed.data.external_id)
-      .eq("kind", "product_optimized")
-      .not("before_meta", "is", null)
-      .order("done_at", { ascending: false })
-      .limit(1)
+      .eq("external_id", parsed.data.external_id)
       .maybeSingle();
-
-    const original = log?.before_meta as { title?: string; body_html?: string } | undefined;
+    let original = audit?.applied_revision_meta as { title?: string; body_html?: string } | undefined;
+    if (!original?.title && !original?.body_html) {
+      const { data: log } = await supabase
+        .from("site_optimizations")
+        .select("before_meta")
+        .eq("site_id", params.siteId)
+        .eq("target_id", parsed.data.external_id)
+        .in("kind", ["product_optimized", "product_description"])
+        .not("before_meta", "is", null)
+        .order("done_at", { ascending: false })
+        .limit(1)
+        .maybeSingle();
+      original = log?.before_meta as { title?: string; body_html?: string } | undefined;
+    }
     if (!original?.title && !original?.body_html) {
       return NextResponse.json({ error: "no_snapshot_available" }, { status: 404 });
     }
 
-    await updateProduct(shop, token, parsed.data.external_id, {
+    const pid = parsed.data.external_id.includes("/") ? parsed.data.external_id.split("/").pop()! : parsed.data.external_id;
+    await updateProduct(shop, token, pid, {
       title: original.title,
       body_html: original.body_html,
     });
