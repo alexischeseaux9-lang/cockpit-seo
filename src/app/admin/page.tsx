@@ -11,6 +11,9 @@ import {
   Link2,
   CheckCircle2,
   Lock,
+  FileText,
+  ChevronRight,
+  RefreshCw,
 } from "lucide-react";
 import { ConnectModal } from "./connect-modal";
 import { VERSION } from "@/lib/version";
@@ -18,6 +21,7 @@ import { VERSION } from "@/lib/version";
 type Health = {
   pending: number;
   errors_24h: number;
+  published: number;
   last_published_at: string | null;
 };
 
@@ -150,12 +154,20 @@ export default function AdminPage() {
               {VERSION}
             </span>
           </div>
-          <button
-            onClick={() => setShowAdd(true)}
-            className="flex items-center gap-2 rounded-lg bg-emerald-600 px-3 py-2 text-sm font-medium hover:bg-emerald-500"
-          >
-            <Plus size={16} /> Ajouter un site
-          </button>
+          <div className="flex items-center gap-2">
+            <button
+              onClick={() => load(password)}
+              className="flex items-center gap-2 rounded-lg border border-zinc-700 px-3 py-2 text-sm text-zinc-300 hover:border-zinc-500"
+            >
+              <RefreshCw size={16} className={loading ? "animate-spin" : ""} /> Rafraichir
+            </button>
+            <button
+              onClick={() => setShowAdd(true)}
+              className="flex items-center gap-2 rounded-lg bg-emerald-600 px-3 py-2 text-sm font-medium hover:bg-emerald-500"
+            >
+              <Plus size={16} /> Ajouter un site
+            </button>
+          </div>
         </div>
 
         {warning === "supabase_not_configured" && (
@@ -194,10 +206,14 @@ export default function AdminPage() {
                 </span>
               </div>
 
-              <div className="mb-4 grid grid-cols-3 gap-2 text-sm">
+              <div className="mb-4 grid grid-cols-2 gap-2 text-sm">
+                <div className="flex items-center gap-1.5 text-zinc-300">
+                  <FileText size={14} className="text-zinc-500" />
+                  {site.health.published} publies
+                </div>
                 <div className="flex items-center gap-1.5 text-zinc-300">
                   <Clock size={14} className="text-zinc-500" />
-                  {site.health.pending} pending
+                  {site.health.pending} en file
                 </div>
                 <div className={`flex items-center gap-1.5 ${healthColor(site.health.errors_24h)}`}>
                   <AlertTriangle size={14} />
@@ -211,18 +227,26 @@ export default function AdminPage() {
                 </div>
               </div>
 
-              {site.connection_status === "connected" ? (
-                <span className="flex items-center gap-1.5 text-sm text-emerald-400">
-                  <CheckCircle2 size={14} /> Connecte
-                </span>
-              ) : (
-                <button
-                  onClick={() => setConnectFor(site)}
-                  className="flex items-center gap-1.5 rounded-lg border border-zinc-700 px-3 py-1.5 text-sm text-zinc-200 hover:border-emerald-500"
+              <div className="flex items-center justify-between border-t border-zinc-800 pt-3">
+                {site.connection_status === "connected" ? (
+                  <span className="flex items-center gap-1.5 text-sm text-emerald-400">
+                    <CheckCircle2 size={14} /> Connecte
+                  </span>
+                ) : (
+                  <button
+                    onClick={() => setConnectFor(site)}
+                    className="flex items-center gap-1.5 rounded-lg border border-zinc-700 px-3 py-1.5 text-sm text-zinc-200 hover:border-emerald-500"
+                  >
+                    <Link2 size={14} /> Connecter Shopify
+                  </button>
+                )}
+                <Link
+                  href={`/admin/sites/${site.id}`}
+                  className="flex items-center gap-1 rounded-lg bg-zinc-800 px-3 py-1.5 text-sm font-medium text-zinc-100 hover:bg-zinc-700"
                 >
-                  <Link2 size={14} /> Connecter Shopify
-                </button>
-              )}
+                  Ouvrir <ChevronRight size={14} />
+                </Link>
+              </div>
             </div>
           ))}
         </div>

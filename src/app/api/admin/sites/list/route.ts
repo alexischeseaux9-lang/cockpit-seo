@@ -26,7 +26,7 @@ export async function GET(req: NextRequest) {
 
   const enriched = await Promise.all(
     (sites || []).map(async (site) => {
-      const [{ count: pending }, { count: errors24h }] = await Promise.all([
+      const [{ count: pending }, { count: errors24h }, { count: published }] = await Promise.all([
         supabase
           .from("site_jobs")
           .select("id", { count: "exact", head: true })
@@ -38,12 +38,18 @@ export async function GET(req: NextRequest) {
           .eq("site_id", site.id)
           .eq("status", "error")
           .gte("updated_at", since),
+        supabase
+          .from("blog_posts")
+          .select("id", { count: "exact", head: true })
+          .eq("site_id", site.id)
+          .eq("published", true),
       ]);
       return {
         ...site,
         health: {
           pending: pending || 0,
           errors_24h: errors24h || 0,
+          published: published || 0,
           last_published_at: site.last_published_at,
         },
       };
