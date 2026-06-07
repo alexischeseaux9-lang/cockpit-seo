@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
+import Link from "next/link";
 import {
   Plus,
   Loader2,
@@ -180,7 +181,12 @@ export default function AdminPage() {
             >
               <div className="mb-3 flex items-start justify-between">
                 <div>
-                  <h3 className="font-medium text-zinc-100">{site.name}</h3>
+                  <Link
+                    href={`/admin/sites/${site.id}`}
+                    className="font-medium text-zinc-100 hover:text-emerald-400"
+                  >
+                    {site.name}
+                  </Link>
                   <p className="text-xs text-zinc-500">{site.url}</p>
                 </div>
                 <span className="rounded border border-zinc-700 px-1.5 py-0.5 text-xs text-zinc-400">
