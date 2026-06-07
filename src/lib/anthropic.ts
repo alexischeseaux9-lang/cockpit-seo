@@ -141,6 +141,172 @@ export async function editArticle(body_html: string): Promise<string> {
   return cleaned;
 }
 
+// M3: onboarding discover. Analyse le texte du site et propose un voice profile.
+export type DiscoverResult = {
+  voice_profile: {
+    tone_description: string;
+    audience: string;
+    content_language: string;
+    image_style_hint: string;
+    branding_accent_hex: string;
+    author_name: string;
+    author_role: string;
+    author_bio: string;
+  };
+  keyword_pillars: string[];
+};
+
+export async function discoverProfile(url: string, siteText: string): Promise<DiscoverResult> {
+  const c = client();
+  const msg = await c.messages.create({
+    model: HAIKU,
+    max_tokens: 1800,
+    system: `Tu analyses un site e-commerce pour en deduire un profil editorial. ${STYLE_RULES}`,
+    messages: [
+      {
+        role: "user",
+        content: `Site: ${url}
+
+Contenu extrait (tronque):
+${siteText.slice(0, 6000)}
+
+Deduis le profil. Reponds UNIQUEMENT en JSON:
+{
+  "voice_profile": {
+    "tone_description": "ton editorial en 1 phrase",
+    "audience": "audience cible",
+    "content_language": "francais|anglais|allemand|italien|espagnol",
+    "image_style_hint": "style visuel pour les images",
+    "branding_accent_hex": "#xxxxxx",
+    "author_name": "prenom d'un auteur fictif coherent",
+    "author_role": "role de l'auteur",
+    "author_bio": "bio courte de l'auteur"
+  },
+  "keyword_pillars": ["12 thematiques de mots-cles SEO pertinentes pour cette niche"]
+}`,
+      },
+    ],
+  });
+  const text = msg.content.map((b) => (b.type === "text" ? b.text : "")).join("");
+  return extractJson(text) as DiscoverResult;
+}
+
+// M4: genere une liste de mots-cles SEO pour une niche.
+export async function keywordScout(niche: string, count: number, lang: string): Promise<string[]> {
+  const c = client();
+  const msg = await c.messages.create({
+    model: HAIKU,
+    max_tokens: 4000,
+    system: `Tu es un expert SEO. Tu generes des mots-cles long-tail a fort intent. ${STYLE_RULES}`,
+    messages: [
+      {
+        role: "user",
+        content: `Genere ${count} mots-cles SEO long-tail en ${lang} pour la niche: "${niche}". Varie informationnel et commercial. Reponds UNIQUEMENT en JSON: { "keywords": ["..."] }`,
+      },
+    ],
+  });
+  const text = msg.content.map((b) => (b.type === "text" ? b.text : "")).join("");
+  const out = extractJson(text);
+  return (out.keywords || []).map((k: string) => stripEmDashes(k)).slice(0, count);
+}
+
+// M5: audit + optimisation d'une fiche produit.
+export type ProductAudit = {
+  audit_score: number;
+  audit_notes: string[];
+  proposed_title: string;
+  proposed_body_html: string;
+  proposed_meta_title: string;
+  proposed_meta_description: string;
+};
+
+export async function auditProduct(
+  title: string,
+  bodyHtml: string,
+  voiceProfile: Record<string, any>
+): Promise<ProductAudit> {
+  const c = client();
+  const lang = voiceProfile.content_language || "francais";
+  const msg = await c.messages.create({
+    model: SONNET,
+    max_tokens: 3000,
+    system: `Tu es un expert CRO et copywriting e-commerce. Tu ecris en ${lang}. ${STYLE_RULES}`,
+    messages: [
+      {
+        role: "user",
+        content: `Audite et reecris cette fiche produit pour maximiser conversion et SEO.
+
+Titre actuel: ${title}
+Description actuelle (HTML): ${bodyHtml.slice(0, 3000) || "(vide)"}
+
+Reponds UNIQUEMENT en JSON:
+{
+  "audit_score": <0-100>,
+  "audit_notes": ["2 a 4 problemes constates"],
+  "proposed_title": "titre optimise",
+  "proposed_body_html": "<description HTML optimisee: accroche, benefices en <ul>, reassurance>",
+  "proposed_meta_title": "< 60 caracteres",
+  "proposed_meta_description": "< 155 caracteres"
+}`,
+      },
+    ],
+  });
+  const text = msg.content.map((b) => (b.type === "text" ? b.text : "")).join("");
+  const a = extractJson(text) as ProductAudit;
+  a.proposed_title = stripEmDashes(a.proposed_title);
+  a.proposed_body_html = stripEmDashes(a.proposed_body_html);
+  a.proposed_meta_title = stripEmDashes(a.proposed_meta_title);
+  a.proposed_meta_description = stripEmDashes(a.proposed_meta_description);
+  return a;
+}
+
+// M5: optimisation d'une collection / categorie.
+export type CollectionAnalysis = {
+  quality_score: number;
+  intent_class: string;
+  suggested_description_html: string;
+  suggested_meta_title: string;
+  suggested_meta_description: string;
+};
+
+export async function analyzeCollection(
+  name: string,
+  currentDescription: string,
+  voiceProfile: Record<string, any>
+): Promise<CollectionAnalysis> {
+  const c = client();
+  const lang = voiceProfile.content_language || "francais";
+  const msg = await c.messages.create({
+    model: SONNET,
+    max_tokens: 2500,
+    system: `Tu es un expert SEO e-commerce. Tu ecris en ${lang}. ${STYLE_RULES}`,
+    messages: [
+      {
+        role: "user",
+        content: `Optimise cette page collection pour le SEO et la conversion.
+
+Nom: ${name}
+Description actuelle: ${currentDescription.slice(0, 2000) || "(vide)"}
+
+Reponds UNIQUEMENT en JSON:
+{
+  "quality_score": <0-100>,
+  "intent_class": "commercial|informational|hybrid|navigational",
+  "suggested_description_html": "<description HTML riche et optimisee>",
+  "suggested_meta_title": "< 60 caracteres",
+  "suggested_meta_description": "< 155 caracteres"
+}`,
+      },
+    ],
+  });
+  const text = msg.content.map((b) => (b.type === "text" ? b.text : "")).join("");
+  const a = extractJson(text) as CollectionAnalysis;
+  a.suggested_description_html = stripEmDashes(a.suggested_description_html);
+  a.suggested_meta_title = stripEmDashes(a.suggested_meta_title);
+  a.suggested_meta_description = stripEmDashes(a.suggested_meta_description);
+  return a;
+}
+
 export async function generateImagePrompt(
   title: string,
   voiceProfile: Record<string, any>

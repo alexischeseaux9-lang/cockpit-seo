@@ -56,6 +56,109 @@ export async function ensureValidToken(
   return fresh;
 }
 
+// ---- Produits (M5) ----
+export type ShopifyProduct = {
+  id: number;
+  title: string;
+  handle: string;
+  body_html: string;
+  image: string | null;
+};
+
+export async function listProducts(shop: string, token: string, limit = 50): Promise<ShopifyProduct[]> {
+  const res = await fetch(`${apiBase(shop)}/products.json?limit=${limit}`, {
+    headers: { "X-Shopify-Access-Token": token },
+    cache: "no-store",
+  });
+  if (!res.ok) throw new Error(`shopify_products_failed:${res.status}`);
+  const data = await res.json();
+  return (data.products || []).map((p: any) => ({
+    id: p.id,
+    title: p.title,
+    handle: p.handle,
+    body_html: p.body_html || "",
+    image: p.image?.src || null,
+  }));
+}
+
+export async function updateProduct(
+  shop: string,
+  token: string,
+  productId: string | number,
+  patch: { title?: string; body_html?: string; metaTitle?: string; metaDescription?: string }
+): Promise<void> {
+  const product: any = { id: Number(productId) };
+  if (patch.title) product.title = patch.title;
+  if (patch.body_html) product.body_html = patch.body_html;
+  if (patch.metaTitle || patch.metaDescription) {
+    product.metafields = [];
+    if (patch.metaTitle)
+      product.metafields.push({ namespace: "global", key: "title_tag", value: patch.metaTitle, type: "single_line_text_field" });
+    if (patch.metaDescription)
+      product.metafields.push({ namespace: "global", key: "description_tag", value: patch.metaDescription, type: "single_line_text_field" });
+  }
+  const res = await fetch(`${apiBase(shop)}/products/${productId}.json`, {
+    method: "PUT",
+    headers: { "X-Shopify-Access-Token": token, "Content-Type": "application/json" },
+    body: JSON.stringify({ product }),
+    cache: "no-store",
+  });
+  if (!res.ok) throw new Error(`shopify_product_update_failed:${res.status}`);
+}
+
+// ---- Collections (M5) ----
+export type ShopifyCollection = {
+  id: number;
+  title: string;
+  handle: string;
+  body_html: string;
+  kind: "custom" | "smart";
+};
+
+export async function listCollections(shop: string, token: string): Promise<ShopifyCollection[]> {
+  const [custom, smart] = await Promise.all([
+    fetch(`${apiBase(shop)}/custom_collections.json?limit=100`, { headers: { "X-Shopify-Access-Token": token }, cache: "no-store" }),
+    fetch(`${apiBase(shop)}/smart_collections.json?limit=100`, { headers: { "X-Shopify-Access-Token": token }, cache: "no-store" }),
+  ]);
+  const out: ShopifyCollection[] = [];
+  if (custom.ok) {
+    const d = await custom.json();
+    for (const c of d.custom_collections || []) out.push({ id: c.id, title: c.title, handle: c.handle, body_html: c.body_html || "", kind: "custom" });
+  }
+  if (smart.ok) {
+    const d = await smart.json();
+    for (const c of d.smart_collections || []) out.push({ id: c.id, title: c.title, handle: c.handle, body_html: c.body_html || "", kind: "smart" });
+  }
+  return out;
+}
+
+export async function updateCollection(
+  shop: string,
+  token: string,
+  collectionId: string | number,
+  kind: "custom" | "smart",
+  patch: { body_html?: string; metaTitle?: string; metaDescription?: string }
+): Promise<void> {
+  const key = kind === "custom" ? "custom_collection" : "smart_collection";
+  const path = kind === "custom" ? "custom_collections" : "smart_collections";
+  const collection: any = { id: Number(collectionId) };
+  if (patch.body_html) collection.body_html = patch.body_html;
+  if (patch.metaTitle || patch.metaDescription) {
+    collection.metafields = [];
+    if (patch.metaTitle)
+      collection.metafields.push({ namespace: "global", key: "title_tag", value: patch.metaTitle, type: "single_line_text_field" });
+    if (patch.metaDescription)
+      collection.metafields.push({ namespace: "global", key: "description_tag", value: patch.metaDescription, type: "single_line_text_field" });
+  }
+  const res = await fetch(`${apiBase(shop)}/${path}/${collectionId}.json`, {
+    method: "PUT",
+    headers: { "X-Shopify-Access-Token": token, "Content-Type": "application/json" },
+    body: JSON.stringify({ [key]: collection }),
+    cache: "no-store",
+  });
+  if (!res.ok) throw new Error(`shopify_collection_update_failed:${res.status}`);
+}
+
 export async function getDefaultBlogId(shop: string, token: string): Promise<number> {
   const res = await fetch(`${apiBase(shop)}/blogs.json`, {
     headers: { "X-Shopify-Access-Token": token },

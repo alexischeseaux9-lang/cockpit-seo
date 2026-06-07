@@ -5,6 +5,25 @@ import { analyzeSerp } from "./serp";
 import { generateBrief, writeArticle, editArticle, generateImagePrompt } from "./anthropic";
 import { generateCoverImage } from "./fal";
 import { assertNoAntiPatterns, assertPersonaIsolation } from "./guards";
+import { classifyError } from "./retry-classifier";
+import { sendAlert } from "./alerts";
+
+// Smoke test post-publish: poll HEAD sur l'URL canonique (court, compatible serverless).
+async function smokeTest(url: string): Promise<string | null> {
+  const deadline = Date.now() + 18_000;
+  let last = 0;
+  while (Date.now() < deadline) {
+    try {
+      const res = await fetch(url, { method: "HEAD", cache: "no-store" });
+      last = res.status;
+      if (res.status === 200) return null;
+    } catch {
+      last = 0;
+    }
+    await new Promise((r) => setTimeout(r, 3000));
+  }
+  return `route_not_resolved_after_18000ms:last_status=${last}`;
+}
 
 async function getShopLocale(shop: string, token: string): Promise<string> {
   try {
@@ -125,6 +144,9 @@ export async function runJob(jobId: string): Promise<{ ok: boolean; error?: stri
 
     const nowIso = new Date().toISOString();
 
+    // smoke test (non bloquant: on garde l'article mais on flag si non verifie)
+    const verificationWarning = await smokeTest(result.url);
+
     // blog_posts (copie cote Supabase)
     await supabase.from("blog_posts").insert({
       site_id: site.id,
@@ -160,7 +182,14 @@ export async function runJob(jobId: string): Promise<{ ok: boolean; error?: stri
       .from("site_jobs")
       .update({
         status: "done",
-        output: { article_id: result.articleId, url: result.url, handle: result.handle, image: imageUrl, title: brief.title },
+        output: {
+          article_id: result.articleId,
+          url: result.url,
+          handle: result.handle,
+          image: imageUrl,
+          title: brief.title,
+          verification_warning: verificationWarning,
+        },
         completed_at: nowIso,
         updated_at: nowIso,
       })
@@ -175,16 +204,49 @@ export async function runJob(jobId: string): Promise<{ ok: boolean; error?: stri
     return { ok: true };
   } catch (e) {
     const msg = e instanceof Error ? e.message : "unknown_error";
-    await supabase
-      .from("site_jobs")
-      .update({
-        status: "error",
-        error: msg,
-        attempts: (job.attempts || 0) + 1,
-        last_retried_at: new Date().toISOString(),
-        updated_at: new Date().toISOString(),
-      })
-      .eq("id", jobId);
+    const attempts = (job.attempts || 0) + 1;
+    const decision = classifyError(msg, attempts);
+    const nowIso = new Date().toISOString();
+
+    if (decision.retry) {
+      // re-planifie en pending avec backoff
+      await supabase
+        .from("site_jobs")
+        .update({
+          status: "pending",
+          error: msg,
+          attempts,
+          last_retried_at: nowIso,
+          scheduled_at: new Date(Date.now() + decision.delayMs).toISOString(),
+          updated_at: nowIso,
+        })
+        .eq("id", jobId);
+    } else {
+      await supabase
+        .from("site_jobs")
+        .update({
+          status: decision.pauseSite ? "paused" : "error",
+          error: msg,
+          paused_reason: decision.pauseSite ? decision.class : null,
+          attempts,
+          last_retried_at: nowIso,
+          updated_at: nowIso,
+        })
+        .eq("id", jobId);
+    }
+
+    if (decision.pauseSite) {
+      await supabase
+        .from("sites")
+        .update({ paused_at: nowIso, paused_reason: decision.class, updated_at: nowIso })
+        .eq("id", job.site_id);
+    }
+    if (decision.alert) {
+      await sendAlert(
+        `[Cockpit SEO] Job ${decision.class}`,
+        `Site ${site.name} (${site.id})\nJob ${jobId}\nErreur: ${msg}`
+      );
+    }
     return { ok: false, error: msg };
   }
 }
