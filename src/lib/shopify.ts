@@ -199,6 +199,25 @@ export async function getDefaultBlogId(shop: string, token: string): Promise<num
   return blog.id as number;
 }
 
+export async function getArticle(shop: string, token: string, blogId: number, articleId: string | number) {
+  const res = await fetch(`${apiBase(shop)}/blogs/${blogId}/articles/${articleId}.json`, {
+    headers: { "X-Shopify-Access-Token": token },
+    cache: "no-store",
+  });
+  if (!res.ok) return null;
+  return (await res.json()).article;
+}
+
+export async function updateArticleBody(shop: string, token: string, blogId: number, articleId: string | number, bodyHtml: string): Promise<void> {
+  const res = await fetch(`${apiBase(shop)}/blogs/${blogId}/articles/${articleId}.json`, {
+    method: "PUT",
+    headers: { "X-Shopify-Access-Token": token, "Content-Type": "application/json" },
+    body: JSON.stringify({ article: { id: Number(articleId), body_html: bodyHtml } }),
+    cache: "no-store",
+  });
+  if (!res.ok) throw new Error(`shopify_article_update_failed:${res.status}`);
+}
+
 export type PublishInput = {
   shop: string;
   token: string;

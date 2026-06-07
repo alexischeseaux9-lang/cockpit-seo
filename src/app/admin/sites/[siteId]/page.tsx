@@ -151,7 +151,7 @@ export default function SiteDetail({ params }: { params: { siteId: string } }) {
         {password && tab === "categories" && <CategoriesTab siteId={siteId} api={api} setMsg={setMsg} />}
         {password && tab === "scro" && <ScroTab siteId={siteId} api={api} setMsg={setMsg} />}
         {password && tab === "profil" && <ProfilTab siteId={siteId} api={api} setMsg={setMsg} onSaved={loadSite} />}
-        {password && tab === "image" && <ImageTab api={api} setMsg={setMsg} />}
+        {password && tab === "image" && <ImageTab siteId={siteId} api={api} setMsg={setMsg} />}
         {password && tab === "history" && <HistoryTab siteId={siteId} api={api} />}
       </div>
     </main>
@@ -488,6 +488,9 @@ function ScroTab({ siteId, api, setMsg }: { siteId: string; api: ApiFn; setMsg: 
   }, [siteId, api]);
   useEffect(() => { load(); }, [load]);
 
+  const [lowHanging, setLowHanging] = useState(false);
+  const [injection, setInjection] = useState<{ id: string; text: string; post: string } | null>(null);
+
   async function ingest() {
     if (!raw.trim()) return;
     setBusy("ing"); setMsg("Ingestion des donnees Search Console...");
@@ -495,47 +498,77 @@ function ScroTab({ siteId, api, setMsg }: { siteId: string; api: ApiFn; setMsg: 
     setBusy(null); setMsg(ok ? `${json.ingested} requetes ingerees` : `Erreur: ${json.error}`);
     if (ok) { setRaw(""); load(); }
   }
-  async function inject(payload: any, label: string) {
-    setBusy(label); setMsg("Mise en file des articles...");
-    const { ok, json } = await api(`/api/admin/sites/${siteId}/scro/enqueue`, { method: "POST", body: JSON.stringify(payload) });
-    setBusy(null); setMsg(ok ? `${json.enqueued} article(s) mis en file` : `Erreur: ${json.error}`);
-    if (ok) load();
+  async function inject(id: string) {
+    setBusy(id + "i"); setMsg("Generation de l'injection (langue du site)...");
+    const { ok, json } = await api(`/api/admin/sites/${siteId}/scro/inject`, { method: "POST", body: JSON.stringify({ id }) });
+    setBusy(null);
+    if (ok) { setInjection({ id, text: json.injection, post: json.post_title }); setMsg(null); }
+    else setMsg(`Erreur: ${json.error}`);
   }
+  async function push(id: string) {
+    setBusy(id + "p"); setMsg("Push live de l'injection...");
+    const { ok, json } = await api(`/api/admin/sites/${siteId}/scro/push`, { method: "POST", body: JSON.stringify({ id }) });
+    setBusy(null); setMsg(ok ? "Injection poussee dans l'article." : `Erreur: ${json.error}`);
+    if (ok) { setInjection(null); load(); }
+  }
+
+  const shown = lowHanging ? rows.filter((r) => r.position != null && r.position >= 5 && r.position <= 15) : rows;
 
   return (
     <div className="space-y-5">
       <div className={cardCls}>
         <h3 className="mb-1 flex items-center gap-2 font-medium"><BarChart3 size={16} /> Ingestion Search Console</h3>
-        <p className="mb-2 text-xs text-zinc-500">Colle ton export Search Console (colonnes: requete, clics, impressions, position). Un par ligne, separateur tab/virgule/point-virgule.</p>
-        <textarea value={raw} onChange={(e) => setRaw(e.target.value)} rows={5} className={`${inputCls} mb-3 font-mono`} placeholder={"wool work socks\t12\t340\t14.2\nbamboo socks men\t5\t190\t9.8"} />
+        <p className="mb-2 text-xs text-zinc-500">Colle ton export (requete, clics, impressions, ctr, position). Separateur tab/virgule/point-virgule.</p>
+        <textarea value={raw} onChange={(e) => setRaw(e.target.value)} rows={5} className={`${inputCls} mb-3 font-mono`} placeholder={"wool work socks\t12\t340\t3.5%\t14.2\nbamboo socks men\t5\t190\t2.6%\t9.8"} />
         <button onClick={ingest} disabled={busy === "ing" || !raw.trim()} className={primaryBtn}>
           {busy === "ing" ? <Loader2 size={16} className="animate-spin" /> : <UploadCloud size={16} />} Ingerer
         </button>
       </div>
 
       <div className="flex items-center justify-between">
-        <h3 className="font-medium">Requetes ({rows.length})</h3>
-        <button onClick={() => inject({ min_position: 8, limit: 20 }, "bulk")} disabled={busy === "bulk" || !rows.length} className={ghostBtn}>
-          {busy === "bulk" ? <Loader2 size={12} className="animate-spin" /> : <Plus size={12} />} Injecter (position 8+)
+        <h3 className="font-medium">Requetes ({shown.length})</h3>
+        <button onClick={() => setLowHanging((v) => !v)} className={`rounded-full border px-2.5 py-1 text-xs ${lowHanging ? "border-emerald-600 text-emerald-300" : "border-zinc-700 text-zinc-400"}`}>
+          low-hanging (pos 5-15)
         </button>
       </div>
 
       <div className="space-y-2">
-        {rows.length === 0 && <p className="text-sm text-zinc-500">Aucune donnee. Colle ton export Search Console ci-dessus.</p>}
-        {rows.map((r) => (
+        {shown.length === 0 && <p className="text-sm text-zinc-500">Aucune donnee. Colle ton export Search Console ci-dessus.</p>}
+        {shown.map((r) => (
           <div key={r.id} className="flex items-center justify-between rounded-lg border border-zinc-800 bg-zinc-900/40 p-3">
             <div className="min-w-0">
               <p className="truncate text-sm text-zinc-200">{r.query}</p>
-              <p className="text-xs text-zinc-500">pos {r.position ?? "?"} · {r.impressions} impr · {r.clicks} clics {r.enqueued ? "· en file" : ""}</p>
+              <p className="text-xs text-zinc-500">pos {r.position ?? "?"} · {r.impressions} impr · {r.clicks} clics {r.pushed_at ? "· pousse" : ""}</p>
             </div>
-            {!r.enqueued && (
-              <button onClick={() => inject({ ids: [r.id] }, r.id)} disabled={busy === r.id} className={ghostBtn}>
-                {busy === r.id ? <Loader2 size={12} className="animate-spin" /> : <Plus size={12} />} Article
+            <div className="flex items-center gap-2">
+              <button onClick={() => inject(r.id)} disabled={busy === r.id + "i"} className={ghostBtn}>
+                {busy === r.id + "i" ? <Loader2 size={12} className="animate-spin" /> : <Wand2 size={12} />} Injection
               </button>
-            )}
+              {r.suggested_injection && !r.pushed_at && (
+                <button onClick={() => push(r.id)} disabled={busy === r.id + "p"} className={ghostBtn}>
+                  {busy === r.id + "p" ? <Loader2 size={12} className="animate-spin" /> : <UploadCloud size={12} />} Push live
+                </button>
+              )}
+            </div>
           </div>
         ))}
       </div>
+
+      {injection && (
+        <div className="fixed inset-0 z-50 flex justify-end bg-black/60">
+          <div className="h-full w-full max-w-lg overflow-y-auto border-l border-zinc-800 bg-zinc-950 p-6">
+            <div className="mb-3 flex items-center justify-between">
+              <h3 className="font-medium">Injection proposee</h3>
+              <button onClick={() => setInjection(null)} className="text-zinc-400 hover:text-zinc-100"><Undo2 size={18} /></button>
+            </div>
+            <p className="mb-2 text-xs text-zinc-500">Cible: {injection.post}</p>
+            <div className="mb-4 rounded-lg border border-zinc-800 bg-zinc-900/40 p-3 text-sm text-zinc-300" dangerouslySetInnerHTML={{ __html: injection.text }} />
+            <button onClick={() => push(injection.id)} disabled={busy === injection.id + "p"} className={primaryBtn}>
+              {busy === injection.id + "p" ? <Loader2 size={16} className="animate-spin" /> : <UploadCloud size={16} />} Push live dans l'article
+            </button>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
@@ -668,31 +701,56 @@ function ProfilTab({ siteId, api, setMsg, onSaved }: { siteId: string; api: ApiF
   );
 }
 
-function ImageTab({ api, setMsg }: { api: ApiFn; setMsg: (s: string | null) => void }) {
+function ImageTab({ siteId, api, setMsg }: { siteId: string; api: ApiFn; setMsg: (s: string | null) => void }) {
   const [prompt, setPrompt] = useState("");
-  const [url, setUrl] = useState<string | null>(null);
+  const [model, setModel] = useState("fal-ai/flux/dev");
+  const [size, setSize] = useState("landscape_16_9");
   const [busy, setBusy] = useState(false);
+  const [runs, setRuns] = useState<any[]>([]);
+
+  const load = useCallback(async () => {
+    const { ok, json } = await api(`/api/admin/image-lab?site_id=${siteId}`);
+    if (ok) setRuns(json.runs || []);
+  }, [siteId, api]);
+  useEffect(() => { load(); }, [load]);
+
   async function gen() {
     if (!prompt.trim()) return;
-    setBusy(true); setUrl(null); setMsg("Generation de l'image...");
-    const { ok, json } = await api(`/api/admin/image-lab`, { method: "POST", body: JSON.stringify({ prompt }) });
+    setBusy(true); setMsg("Generation de l'image...");
+    const { ok, json } = await api(`/api/admin/image-lab`, { method: "POST", body: JSON.stringify({ site_id: siteId, prompt, model, size }) });
     setBusy(false);
-    if (ok) { setUrl(json.url); setMsg(null); } else setMsg(`Erreur: ${json.error}`);
+    if (ok) { setMsg(null); load(); } else setMsg(`Erreur: ${json.error}`);
   }
   return (
     <div className="space-y-4">
       <div className={cardCls}>
         <textarea value={prompt} onChange={(e) => setPrompt(e.target.value)} rows={3} className={`${inputCls} mb-3`} placeholder="A cozy flat-lay of wool socks on a wooden table, natural light" />
+        <div className="mb-3 grid grid-cols-2 gap-2">
+          <select value={model} onChange={(e) => setModel(e.target.value)} className={inputCls}>
+            <option value="fal-ai/flux/dev">flux/dev</option>
+            <option value="fal-ai/flux-pro">flux-pro</option>
+            <option value="fal-ai/flux/schnell">flux/schnell (rapide)</option>
+          </select>
+          <select value={size} onChange={(e) => setSize(e.target.value)} className={inputCls}>
+            <option value="landscape_16_9">landscape 16:9</option>
+            <option value="landscape_4_3">landscape 4:3</option>
+            <option value="square_hd">square HD</option>
+            <option value="portrait_16_9">portrait 16:9</option>
+          </select>
+        </div>
         <button onClick={gen} disabled={busy || !prompt.trim()} className={primaryBtn}>
           {busy ? <Loader2 size={16} className="animate-spin" /> : <ImageIcon size={16} />} Generer
         </button>
       </div>
-      {url && (
-        <div className={cardCls}>
-          <img src={url} alt="" className="w-full rounded-lg" />
-          <a href={url} target="_blank" rel="noreferrer" className="mt-2 flex items-center gap-1 text-xs text-emerald-400">Ouvrir <ExternalLink size={12} /></a>
-        </div>
-      )}
+      <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
+        {runs.map((r) => (
+          <div key={r.id} className={cardCls}>
+            <img src={r.public_url} alt="" className="mb-2 w-full rounded" />
+            <p className="line-clamp-1 text-xs text-zinc-500">{r.prompt}</p>
+            <a href={r.public_url} target="_blank" rel="noreferrer" className="flex items-center gap-1 text-xs text-emerald-400">URL <ExternalLink size={11} /></a>
+          </div>
+        ))}
+      </div>
     </div>
   );
 }

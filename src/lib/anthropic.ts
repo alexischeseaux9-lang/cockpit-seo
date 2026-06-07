@@ -429,6 +429,32 @@ Reponds UNIQUEMENT en JSON:
   return a;
 }
 
+// M4 SCRO: genere un paragraphe a injecter dans un article existant pour
+// renforcer le ranking d'une requete. Respecte STRICTEMENT la langue du site.
+export async function generateInjection(
+  query: string,
+  postTitle: string,
+  postExcerpt: string,
+  voiceProfile: Record<string, any>
+): Promise<string> {
+  const c = client();
+  const lang = voiceProfile.content_language || "francais";
+  const msg = await c.messages.create({
+    model: SONNET,
+    max_tokens: 900,
+    system: `Tu es redacteur SEO. Tu ecris EXCLUSIVEMENT en ${lang}, jamais une autre langue. ${STYLE_RULES}`,
+    messages: [
+      {
+        role: "user",
+        content: `Article cible: "${postTitle}". Resume: ${postExcerpt || "(n/a)"}.
+Requete a renforcer: "${query}".
+Ecris UN paragraphe HTML (<h3> + <p>, 80 a 130 mots) a ajouter a cet article pour mieux ranker sur cette requete. Naturel, utile, integre la requete sans bourrage. Reponds uniquement avec le HTML du bloc, rien d'autre.`,
+      },
+    ],
+  });
+  return stripEmDashes(msg.content.map((b) => (b.type === "text" ? b.text : "")).join("").trim());
+}
+
 export async function generateImagePrompt(
   title: string,
   voiceProfile: Record<string, any>
