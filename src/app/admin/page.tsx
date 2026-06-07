@@ -354,6 +354,7 @@ export default function AdminPage() {
         <ConnectModal
           siteId={connectFor.id}
           siteName={connectFor.name}
+          platform={connectFor.platform}
           password={password}
           onClose={() => setConnectFor(null)}
           onConnected={() => {

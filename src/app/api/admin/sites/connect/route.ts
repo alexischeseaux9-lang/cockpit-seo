@@ -1,63 +1,60 @@
 import { NextRequest, NextResponse } from "next/server";
-import { z } from "zod";
 import { isAdmin, unauthorized } from "@/lib/auth";
 import { getServiceClient, isSupabaseConfigured } from "@/lib/supabase";
 import { encrypt } from "@/lib/encryption";
+import { testConnection, Credentials } from "@/lib/sites/connector";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
 
-// Connect Shopify : domaine *.myshopify.com + access token.
-// Le token est chiffre AES-256-GCM puis persiste dans sites.credentials_encrypted.
-const schema = z.object({
-  site_id: z.string().uuid(),
-  shop_domain: z.string().min(1),
-  access_token: z.string().min(1),
-  // Optionnels : permettent de regenerer un access token via le
-  // client_credentials grant Shopify quand le token expire (utilise en M2).
-  client_id: z.string().optional(),
-  client_secret: z.string().optional(),
-});
-
+// Accepte la forme V3 { site_id, credentials:{platform,...} } OU l'ancienne
+// forme Shopify { site_id, shop_domain, access_token, client_id?, client_secret? }.
 export async function POST(req: NextRequest) {
   if (!isAdmin(req)) return unauthorized();
-  if (!isSupabaseConfigured()) {
-    return NextResponse.json({ error: "supabase_not_configured" }, { status: 503 });
-  }
+  if (!isSupabaseConfigured()) return NextResponse.json({ error: "supabase_not_configured" }, { status: 503 });
 
   const body = await req.json().catch(() => null);
-  const parsed = schema.safeParse(body);
-  if (!parsed.success) {
-    return NextResponse.json({ error: parsed.error.flatten() }, { status: 400 });
+  if (!body?.site_id) return NextResponse.json({ error: "missing_site_id" }, { status: 400 });
+
+  // Normalisation
+  let creds: Credentials | null = null;
+  let stored: Record<string, any> | null = null;
+  if (body.credentials?.platform) {
+    creds = body.credentials as Credentials;
+    if (creds.platform === "shopify") {
+      stored = { platform: "shopify", shop_domain: creds.shop, access_token: creds.accessToken, client_id: creds.client_id, client_secret: creds.client_secret };
+    } else {
+      stored = { ...creds };
+    }
+  } else if (body.shop_domain && body.access_token) {
+    creds = { platform: "shopify", shop: body.shop_domain, accessToken: body.access_token, client_id: body.client_id, client_secret: body.client_secret };
+    stored = { platform: "shopify", shop_domain: body.shop_domain, access_token: body.access_token, client_id: body.client_id, client_secret: body.client_secret };
   }
+  if (!creds || !stored) return NextResponse.json({ error: "missing_credentials" }, { status: 400 });
 
-  const { site_id, shop_domain, access_token, client_id, client_secret } = parsed.data;
-
-  let credentials_encrypted: string;
+  // Test live
+  let connection_status = "connected";
+  let connection_error: string | null = null;
   try {
-    credentials_encrypted = encrypt(
-      JSON.stringify({ platform: "shopify", shop_domain, access_token, client_id, client_secret })
-    );
+    await testConnection(creds);
   } catch (e) {
-    return NextResponse.json(
-      { error: e instanceof Error ? e.message : "encryption_failed" },
-      { status: 500 }
-    );
+    connection_status = "error";
+    connection_error = e instanceof Error ? e.message : "connect_failed";
   }
 
   const supabase = getServiceClient();
   const { data, error } = await supabase
     .from("sites")
     .update({
-      credentials_encrypted,
-      connection_status: "connected",
-      connection_error: null,
+      credentials_encrypted: encrypt(JSON.stringify(stored)),
+      connection_status,
+      connection_error,
       updated_at: new Date().toISOString(),
     })
-    .eq("id", site_id)
-    .select("id, name, connection_status")
+    .eq("id", body.site_id)
+    .select("id, name, connection_status, connection_error")
     .single();
 
   if (error) return NextResponse.json({ error: error.message }, { status: 500 });
-  return NextResponse.json({ site: data });
+  return NextResponse.json({ ok: connection_status === "connected", site: data, connection_error });
 }

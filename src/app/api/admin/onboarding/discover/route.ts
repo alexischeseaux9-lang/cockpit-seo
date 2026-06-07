@@ -30,16 +30,23 @@ export async function POST(req: NextRequest) {
   if (meta.text.length < 80) return NextResponse.json({ error: "scrape_empty" }, { status: 422 });
 
   try {
-    const result = await discoverProfile(meta.url, `${meta.title}\n${meta.description}\n${meta.h1.join(" ")}\n${meta.headings.join(" ")}\n${meta.text}`);
+    const ctx = `${meta.title}\n${meta.description}\n${meta.h1 || ""}\n${meta.about_excerpt || ""}\n${meta.paragraphs.join(" ")}\n${meta.text}`;
+    const result = await discoverProfile(meta.url, ctx);
+    // langue detectee prioritaire si le draft ne l'a pas
+    if (!result.voice_profile.content_language && meta.language) {
+      result.voice_profile.content_language = meta.language === "fr" ? "francais" : meta.language === "en" ? "anglais" : meta.language;
+    }
     const supabase = getServiceClient();
     const { data: run } = await supabase
       .from("onboarding_runs")
       .insert({
         url: meta.url,
-        platform: parsed.data.platform || "shopify",
+        platform: parsed.data.platform || meta.inferred_platform || "shopify",
+        discovery: meta,
         draft_voice_profile: result.voice_profile,
-        site_meta: { title: meta.title, description: meta.description, og_image: meta.og_image, keyword_pillars: result.keyword_pillars },
-        status: "pending",
+        voice_profile: result.voice_profile,
+        site_meta: { title: meta.title, description: meta.description, og_image: meta.og_image, keyword_pillars: result.keyword_pillars, inferred_platform: meta.inferred_platform, language: meta.language },
+        status: "reviewing",
       })
       .select("id")
       .single();
@@ -48,6 +55,7 @@ export async function POST(req: NextRequest) {
       run_id: run?.id,
       draft_voice_profile: result.voice_profile,
       keyword_pillars: result.keyword_pillars,
+      discovery: { language: meta.language, inferred_platform: meta.inferred_platform, title: meta.title, description: meta.description, og_image: meta.og_image, favicon: meta.favicon, paragraphs: meta.paragraphs.length },
       site_meta: { title: meta.title, description: meta.description, og_image: meta.og_image },
     });
   } catch (e) {
