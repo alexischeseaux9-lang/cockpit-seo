@@ -34,6 +34,14 @@ export async function GET(req: NextRequest) {
         site.client_view_token = tok;
       }
       const fourteenAgo = new Date(Date.now() - 14 * 24 * 60 * 60 * 1000).toISOString();
+      const now = new Date();
+      const monthStart = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), 1)).toISOString();
+      const { data: usageRows } = await supabase
+        .from("ai_usage_log")
+        .select("cost_usd")
+        .eq("site_id", site.id)
+        .gte("created_at", monthStart);
+      const cost_mtd_usd = (usageRows || []).reduce((s, r) => s + Number(r.cost_usd || 0), 0);
       const [{ count: pending }, { count: errors24h }, { count: published }, { data: recentPosts }] = await Promise.all([
         supabase
           .from("site_jobs")
@@ -80,6 +88,7 @@ export async function GET(req: NextRequest) {
           last_published_at: site.last_published_at,
           sparkline: spark,
           level: healthLevel,
+          cost_mtd_usd: Number(cost_mtd_usd.toFixed(4)),
         },
       };
     })

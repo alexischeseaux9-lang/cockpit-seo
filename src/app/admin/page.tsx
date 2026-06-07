@@ -29,6 +29,7 @@ type Health = {
   last_published_at: string | null;
   sparkline: number[];
   level: string;
+  cost_mtd_usd: number;
 };
 
 type Site = {
@@ -191,6 +192,22 @@ export default function AdminPage() {
           </div>
         </div>
 
+        {!loading && sites.length > 0 && (
+          <div className="mb-6 grid grid-cols-2 gap-3 sm:grid-cols-4">
+            {[
+              { label: "Sites", value: String(sites.length) },
+              { label: "Connectes", value: String(sites.filter((s) => s.connection_status === "connected").length) },
+              { label: "Articles publies", value: String(sites.reduce((a, s) => a + (s.health.published || 0), 0)) },
+              { label: "Cout IA (mois)", value: "$" + sites.reduce((a, s) => a + (s.health.cost_mtd_usd || 0), 0).toFixed(2) },
+            ].map((k) => (
+              <div key={k.label} className="rounded-lg border border-zinc-800 bg-zinc-900/40 p-4">
+                <div className="text-[11px] uppercase tracking-wider text-zinc-500">{k.label}</div>
+                <div className="mt-1 text-2xl font-semibold text-zinc-100">{k.value}</div>
+              </div>
+            ))}
+          </div>
+        )}
+
         {warning === "supabase_not_configured" && (
           <p className="mb-6 rounded-lg border border-amber-900 bg-amber-950/40 p-3 text-sm text-amber-300">
             Supabase pas encore configure. Renseigne NEXT_PUBLIC_SUPABASE_URL et
@@ -258,7 +275,7 @@ export default function AdminPage() {
 
               <div className="mb-3 flex items-center justify-between text-emerald-400">
                 <Sparkline data={site.health.sparkline || []} />
-                <span className="text-xs text-zinc-500">14j</span>
+                <span className="text-xs text-zinc-500">14j · ${(site.health.cost_mtd_usd || 0).toFixed(2)}/mois</span>
               </div>
 
               <div className="flex items-center justify-between border-t border-zinc-800 pt-3">

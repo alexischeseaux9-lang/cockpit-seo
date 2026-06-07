@@ -1,3 +1,5 @@
+import { logFalUsage } from "./ai-usage";
+
 // Generation d'image de couverture via fal.ai (flux/dev).
 // Endpoint synchrone: convient au timeout Vercel (300s).
 
@@ -27,6 +29,7 @@ export async function generateImage(
   const data = await res.json();
   const url = data?.images?.[0]?.url;
   if (!url) throw new Error("fal_no_image");
+  await logFalUsage({ model: m, context: "image_lab", size: s });
   return url as string;
 }
 

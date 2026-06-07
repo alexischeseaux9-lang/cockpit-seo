@@ -1,6 +1,7 @@
 import Anthropic from "@anthropic-ai/sdk";
 import { SerpAnalysis } from "./serp";
 import { stripEmDashes, findAntiPatterns } from "./guards";
+import { logAnthropicUsage } from "./ai-usage";
 
 const SONNET = process.env.CLAUDE_MODEL || "claude-sonnet-4-6";
 const HAIKU = "claude-haiku-4-5";
@@ -120,6 +121,7 @@ Reponds UNIQUEMENT en JSON:
     messages: [{ role: "user", content: prompt }],
   });
   const text = msg.content.map((b) => (b.type === "text" ? b.text : "")).join("");
+  await logAnthropicUsage({ model: SONNET, usage: (msg as any).usage, context: "writer" });
   const out = extractJson(text) as WrittenArticle;
   out.body_html = stripEmDashes(out.body_html);
   out.excerpt = stripEmDashes(out.excerpt);
@@ -376,6 +378,7 @@ Reponds UNIQUEMENT en JSON STRICT:
     ],
   });
   const text = msg.content.map((b) => (b.type === "text" ? b.text : "")).join("");
+  await logAnthropicUsage({ model: SONNET, usage: (msg as any).usage, context: "product_optimize" });
   const o = extractJson(text) as ProductOptimized;
   o.title = stripEmDashes(o.title);
   o.body_html = stripEmDashes(o.body_html);
