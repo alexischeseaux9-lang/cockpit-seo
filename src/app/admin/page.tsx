@@ -15,6 +15,7 @@ import {
   ChevronRight,
   RefreshCw,
   Globe,
+  Sparkles,
 } from "lucide-react";
 import { ConnectModal } from "./connect-modal";
 import { VERSION } from "@/lib/version";
@@ -157,6 +158,12 @@ export default function AdminPage() {
             </span>
           </div>
           <div className="flex items-center gap-2">
+            <Link
+              href="/admin/onboarding-wizard"
+              className="flex items-center gap-2 rounded-lg border border-zinc-700 px-3 py-2 text-sm text-zinc-300 hover:border-emerald-500"
+            >
+              <Sparkles size={16} /> Onboarding
+            </Link>
             <button
               onClick={() => load(password)}
               className="flex items-center gap-2 rounded-lg border border-zinc-700 px-3 py-2 text-sm text-zinc-300 hover:border-zinc-500"

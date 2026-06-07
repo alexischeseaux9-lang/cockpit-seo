@@ -493,14 +493,26 @@ function ProfilTab({ siteId, api, setMsg, onSaved }: { siteId: string; api: ApiF
     if (r1.ok && r2.ok) onSaved();
   }
 
-  const fields: [string, string][] = [
-    ["tone_description", "Ton editorial"],
-    ["audience", "Audience"],
-    ["image_style_hint", "Style des images"],
-    ["author_name", "Nom auteur"],
-    ["author_role", "Role auteur"],
-    ["branding_accent_hex", "Couleur accent (#hex)"],
+  const fields: [string, string, boolean][] = [
+    ["mascot", "Mascotte / persona auteur", false],
+    ["tone_description", "Ton editorial", true],
+    ["audience", "Audience", true],
+    ["example_phrases", "Phrases exemple", true],
+    ["anti_ai_custom", "Regles persona custom", true],
+    ["bonus_instructions", "Instructions bonus", true],
+    ["product_tone_description", "Ton fiches produit", true],
+    ["image_style_hint", "Style des images", false],
+    ["author_name", "Nom auteur", false],
+    ["author_role", "Role auteur", false],
+    ["branding_accent_hex", "Couleur accent (#hex)", false],
   ];
+  const ANTI_AI_PRESETS = ["in conclusion", "delve", "tapestry", "de nos jours", "incontournable", "il est important de noter"];
+  const activePatterns: string[] = Array.isArray(vp.anti_ai_patterns) ? vp.anti_ai_patterns : [];
+  const togglePattern = (p: string) =>
+    setVp((prev) => {
+      const cur: string[] = Array.isArray(prev.anti_ai_patterns) ? prev.anti_ai_patterns : [];
+      return { ...prev, anti_ai_patterns: cur.includes(p) ? cur.filter((x) => x !== p) : [...cur, p] };
+    });
 
   return (
     <div className="space-y-5">
@@ -524,12 +536,32 @@ function ProfilTab({ siteId, api, setMsg, onSaved }: { siteId: string; api: ApiF
             ))}
           </select>
         </div>
-        {fields.map(([k, label]) => (
+        {fields.map(([k, label, long]) => (
           <div key={k}>
             <label className="mb-1 block text-xs text-zinc-400">{label}</label>
-            <input value={f(k)} onChange={(e) => set(k, e.target.value)} className={inputCls} />
+            {long ? (
+              <textarea value={f(k)} onChange={(e) => set(k, e.target.value)} rows={2} className={inputCls} />
+            ) : (
+              <input value={f(k)} onChange={(e) => set(k, e.target.value)} className={inputCls} />
+            )}
           </div>
         ))}
+        <div>
+          <label className="mb-1 block text-xs text-zinc-400">Anti-AI patterns (formules a bannir)</label>
+          <div className="flex flex-wrap gap-2">
+            {Array.from(new Set([...ANTI_AI_PRESETS, ...activePatterns])).map((p) => (
+              <button
+                key={p}
+                onClick={() => togglePattern(p)}
+                className={`rounded-full border px-2.5 py-1 text-xs ${
+                  activePatterns.includes(p) ? "border-emerald-600 bg-emerald-950/40 text-emerald-300" : "border-zinc-700 text-zinc-400"
+                }`}
+              >
+                {p}
+              </button>
+            ))}
+          </div>
+        </div>
         <div>
           <label className="mb-1 block text-xs text-zinc-400">Bio auteur</label>
           <textarea value={f("author_bio")} onChange={(e) => set("author_bio", e.target.value)} rows={2} className={inputCls} />

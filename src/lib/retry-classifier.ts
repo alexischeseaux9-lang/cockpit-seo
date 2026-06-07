@@ -1,58 +1,29 @@
-// Classe une erreur de job et decide de la suite (cf. section 6.4 du master prompt).
+// Classe une erreur de job et decide de la suite (interface V2 action-based).
 
-export type RetryClass =
-  | "credits_exhausted"
-  | "rate_limited"
-  | "network"
-  | "validation"
-  | "route_not_resolved"
-  | "unknown";
+export type RetryDecision =
+  | { action: "retry"; delay_seconds: number }
+  | { action: "pause_site"; reason: string }
+  | { action: "pause_job"; reason: string }
+  | { action: "fail"; reason: string };
 
-export type RetryDecision = {
-  class: RetryClass;
-  retry: boolean;
-  delayMs: number; // 0 si pas de retry
-  pauseSite: boolean;
-  alert: boolean;
-};
-
-export function classifyError(message: string, attempts: number): RetryDecision {
-  const m = (message || "").toLowerCase();
-
-  // Anthropic credits / 402
-  if (m.includes("402") || m.includes("credit") || m.includes("insufficient")) {
-    return { class: "credits_exhausted", retry: false, delayMs: 0, pauseSite: true, alert: true };
+export function classifyError(error: string, attempts: number): RetryDecision {
+  if (/credit_balance|insufficient_credits|insufficient|402/i.test(error)) {
+    return { action: "pause_site", reason: "anthropic_credits_exhausted" };
   }
-  // Rate limit / 429
-  if (m.includes("429") || m.includes("rate") || m.includes("too many")) {
-    const backoff = [60_000, 120_000, 240_000];
-    const idx = Math.min(attempts, backoff.length - 1);
-    return { class: "rate_limited", retry: attempts < 3, delayMs: backoff[idx], pauseSite: false, alert: false };
+  if (/rate_limit|rate limit|too many|429/i.test(error)) {
+    const delay = Math.min(60 * 2 ** attempts, 600);
+    return { action: "retry", delay_seconds: delay };
   }
-  // Reseau
-  if (
-    m.includes("econnreset") ||
-    m.includes("timeout") ||
-    m.includes("etimedout") ||
-    m.includes("fetch failed") ||
-    m.includes("network") ||
-    m.includes("enotfound")
-  ) {
-    return { class: "network", retry: attempts < 3, delayMs: 30_000, pauseSite: false, alert: false };
+  if (/ECONNRESET|ETIMEDOUT|fetch failed|network|ENOTFOUND|timeout/i.test(error)) {
+    return attempts < 3
+      ? { action: "retry", delay_seconds: 30 * (attempts + 1) }
+      : { action: "fail", reason: "network_persistent" };
   }
-  // Validation (zod, anti-pattern, persona, json parse)
-  if (
-    m.includes("anti_patterns") ||
-    m.includes("persona_leak") ||
-    m.includes("json_parse") ||
-    m.includes("missing_keyword") ||
-    m.includes("validation")
-  ) {
-    return { class: "validation", retry: false, delayMs: 0, pauseSite: false, alert: false };
+  if (/validation|invalid input|anti_patterns|persona_leak|json_parse|missing_keyword/i.test(error)) {
+    return { action: "fail", reason: "validation_error" };
   }
-  // URL non resolue apres publish
-  if (m.includes("route_not_resolved")) {
-    return { class: "route_not_resolved", retry: false, delayMs: 0, pauseSite: false, alert: true };
+  if (/route_not_resolved/i.test(error)) {
+    return { action: "pause_job", reason: "route_404_check_taxonomy" };
   }
-  return { class: "unknown", retry: false, delayMs: 0, pauseSite: false, alert: false };
+  return attempts < 5 ? { action: "retry", delay_seconds: 60 } : { action: "fail", reason: "unknown_persistent" };
 }

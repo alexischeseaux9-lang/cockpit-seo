@@ -43,13 +43,14 @@ const ANTI_PATTERNS: string[] = [
   "incontournable",
 ];
 
-export function findAntiPatterns(body: string): string[] {
+export function findAntiPatterns(body: string, extra: string[] = []): string[] {
   const low = body.toLowerCase();
-  return ANTI_PATTERNS.filter((p) => low.includes(p));
+  const all = [...ANTI_PATTERNS, ...extra.map((p) => p.toLowerCase().trim()).filter(Boolean)];
+  return all.filter((p) => low.includes(p));
 }
 
-export function assertNoAntiPatterns(body: string): void {
-  const hits = findAntiPatterns(body);
+export function assertNoAntiPatterns(body: string, extra: string[] = []): void {
+  const hits = findAntiPatterns(body, extra);
   if (hits.length > 0) {
     throw new Error(`anti_patterns_detected:${hits.join(",")}`);
   }

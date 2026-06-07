@@ -88,7 +88,14 @@ export async function writeArticle(
 ): Promise<WrittenArticle> {
   const c = client();
   const lang = voiceProfile.content_language || "francais";
-  const sys = `Tu es un redacteur SEO expert. Tu ecris en ${lang}. ${STYLE_RULES}`;
+  const persona = voiceProfile.mascot || voiceProfile.author_name;
+  const extraBans = [
+    ...(Array.isArray(voiceProfile.anti_ai_patterns) ? voiceProfile.anti_ai_patterns : []),
+    voiceProfile.anti_ai_custom,
+  ].filter(Boolean).join(", ");
+  const sys = `Tu es un redacteur SEO expert${persona ? ` qui ecrit sous la plume de ${persona}` : ""}. Tu ecris en ${lang}. ${STYLE_RULES}${
+    extraBans ? `\nFormules supplementaires a bannir absolument: ${extraBans}.` : ""
+  }${voiceProfile.bonus_instructions ? `\nInstructions specifiques: ${voiceProfile.bonus_instructions}` : ""}`;
   const prompt = `Redige un article de blog complet et optimise SEO.
 
 Titre: ${brief.title}
@@ -96,7 +103,7 @@ Mot-cle principal: ${keyword}
 Mots-cles secondaires: ${brief.secondary_keywords.join(", ")}
 Plan a suivre (H2): ${brief.outline.join(" | ")}
 Longueur cible: ~${brief.target_words} mots.
-Ton: ${voiceProfile.tone_description || "expert, accessible, concret"}
+Ton: ${voiceProfile.tone_description || "expert, accessible, concret"}${voiceProfile.example_phrases ? `\nExemples de phrases dans le ton: ${voiceProfile.example_phrases}` : ""}
 
 Contraintes:
 - Sors du HTML propre: <h2>, <h3>, <p>, <ul><li>, <strong>. Pas de <h1> (le titre est gere a part).
@@ -120,9 +127,9 @@ Reponds UNIQUEMENT en JSON:
 }
 
 // Editor Haiku: si des anti-patterns subsistent, on demande une reecriture ciblee.
-export async function editArticle(body_html: string): Promise<string> {
+export async function editArticle(body_html: string, extraBans: string[] = []): Promise<string> {
   let cleaned = stripEmDashes(body_html);
-  const hits = findAntiPatterns(cleaned);
+  const hits = findAntiPatterns(cleaned, extraBans);
   if (hits.length === 0) return cleaned;
 
   const c = client();
@@ -144,14 +151,18 @@ export async function editArticle(body_html: string): Promise<string> {
 // M3: onboarding discover. Analyse le texte du site et propose un voice profile.
 export type DiscoverResult = {
   voice_profile: {
+    mascot: string;
     tone_description: string;
     audience: string;
+    example_phrases: string;
     content_language: string;
     image_style_hint: string;
     branding_accent_hex: string;
     author_name: string;
     author_role: string;
     author_bio: string;
+    product_tone_description: string;
+    anti_ai_patterns: string[];
   };
   keyword_pillars: string[];
 };
@@ -160,8 +171,8 @@ export async function discoverProfile(url: string, siteText: string): Promise<Di
   const c = client();
   const msg = await c.messages.create({
     model: HAIKU,
-    max_tokens: 1800,
-    system: `Tu analyses un site e-commerce pour en deduire un profil editorial. ${STYLE_RULES}`,
+    max_tokens: 2200,
+    system: `Tu analyses un site e-commerce pour en deduire un profil editorial complet. ${STYLE_RULES}`,
     messages: [
       {
         role: "user",
@@ -170,17 +181,21 @@ export async function discoverProfile(url: string, siteText: string): Promise<Di
 Contenu extrait (tronque):
 ${siteText.slice(0, 6000)}
 
-Deduis le profil. Reponds UNIQUEMENT en JSON:
+Deduis le profil. La langue (content_language) DOIT etre celle du site. Reponds UNIQUEMENT en JSON:
 {
   "voice_profile": {
-    "tone_description": "ton editorial en 1 phrase",
-    "audience": "audience cible",
-    "content_language": "francais|anglais|allemand|italien|espagnol",
+    "mascot": "nom complet d'un auteur persona coherent (ex Camille Renard)",
+    "tone_description": "ton editorial detaille en 2-3 phrases",
+    "audience": "audience cible detaillee",
+    "example_phrases": "3 exemples de phrases dans le ton de la marque",
+    "content_language": "francais|anglais|allemand|italien|espagnol|neerlandais",
     "image_style_hint": "style visuel pour les images",
-    "branding_accent_hex": "#xxxxxx",
-    "author_name": "prenom d'un auteur fictif coherent",
+    "branding_accent_hex": "#xxxxxx couleur d'accent de la marque",
+    "author_name": "prenom de l'auteur",
     "author_role": "role de l'auteur",
-    "author_bio": "bio courte de l'auteur"
+    "author_bio": "bio courte de l'auteur",
+    "product_tone_description": "ton pour les fiches produit",
+    "anti_ai_patterns": ["3 a 5 formules a bannir specifiques a cette marque"]
   },
   "keyword_pillars": ["12 thematiques de mots-cles SEO pertinentes pour cette niche"]
 }`,
@@ -189,6 +204,28 @@ Deduis le profil. Reponds UNIQUEMENT en JSON:
   });
   const text = msg.content.map((b) => (b.type === "text" ? b.text : "")).join("");
   return extractJson(text) as DiscoverResult;
+}
+
+// Re-genere un seul champ du voice profile (bouton "Re-generer ce champ" du wizard).
+export async function regenerateProfileField(
+  url: string,
+  siteText: string,
+  field: string,
+  lang: string
+): Promise<string> {
+  const c = client();
+  const msg = await c.messages.create({
+    model: HAIKU,
+    max_tokens: 600,
+    system: `Tu generes un seul champ de profil editorial pour un site. Langue: ${lang}. ${STYLE_RULES}`,
+    messages: [
+      {
+        role: "user",
+        content: `Site: ${url}\nExtrait: ${siteText.slice(0, 3000)}\n\nGenere uniquement la valeur du champ "${field}". Reponds en texte brut, sans guillemets ni JSON.`,
+      },
+    ],
+  });
+  return stripEmDashes(msg.content.map((b) => (b.type === "text" ? b.text : "")).join("").trim());
 }
 
 // M4: genere une liste de mots-cles SEO pour une niche.

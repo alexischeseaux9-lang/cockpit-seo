@@ -106,12 +106,13 @@ export async function runJob(jobId: string): Promise<{ ok: boolean; error?: stri
     const written = await writeArticle(brief, keyword, voiceWithLang);
 
     // 4. Editor + garde-fous
-    const body = await editArticle(written.body_html);
-    assertNoAntiPatterns(body);
+    const extraBans = Array.isArray(voice.anti_ai_patterns) ? voice.anti_ai_patterns : [];
+    const body = await editArticle(written.body_html, extraBans);
+    assertNoAntiPatterns(body, extraBans);
     assertPersonaIsolation({
       body,
-      expectedShortName: voice.author_name,
-      expectedFullName: voice.author_name,
+      expectedShortName: voice.author_name || voice.mascot,
+      expectedFullName: voice.mascot || voice.author_name,
       forbiddenNames: voice.forbidden_author_names || [],
     });
 
@@ -208,8 +209,7 @@ export async function runJob(jobId: string): Promise<{ ok: boolean; error?: stri
     const decision = classifyError(msg, attempts);
     const nowIso = new Date().toISOString();
 
-    if (decision.retry) {
-      // re-planifie en pending avec backoff
+    if (decision.action === "retry") {
       await supabase
         .from("site_jobs")
         .update({
@@ -217,35 +217,31 @@ export async function runJob(jobId: string): Promise<{ ok: boolean; error?: stri
           error: msg,
           attempts,
           last_retried_at: nowIso,
-          scheduled_at: new Date(Date.now() + decision.delayMs).toISOString(),
+          scheduled_at: new Date(Date.now() + decision.delay_seconds * 1000).toISOString(),
           updated_at: nowIso,
         })
         .eq("id", jobId);
+    } else if (decision.action === "pause_site") {
+      await supabase
+        .from("site_jobs")
+        .update({ status: "paused", error: msg, paused_reason: decision.reason, attempts, last_retried_at: nowIso, updated_at: nowIso })
+        .eq("id", jobId);
+      await supabase
+        .from("sites")
+        .update({ paused_at: nowIso, paused_reason: decision.reason, updated_at: nowIso })
+        .eq("id", job.site_id);
+      await sendAlert(`[Cockpit SEO] Site mis en pause: ${site.name}`, `Raison: ${decision.reason}\nJob ${jobId}\nErreur: ${msg}`);
+    } else if (decision.action === "pause_job") {
+      await supabase
+        .from("site_jobs")
+        .update({ status: "paused", error: msg, paused_reason: decision.reason, attempts, last_retried_at: nowIso, updated_at: nowIso })
+        .eq("id", jobId);
+      await sendAlert(`[Cockpit SEO] Job en pause: ${site.name}`, `Raison: ${decision.reason}\nErreur: ${msg}`);
     } else {
       await supabase
         .from("site_jobs")
-        .update({
-          status: decision.pauseSite ? "paused" : "error",
-          error: msg,
-          paused_reason: decision.pauseSite ? decision.class : null,
-          attempts,
-          last_retried_at: nowIso,
-          updated_at: nowIso,
-        })
+        .update({ status: "error", error: msg, paused_reason: decision.reason, attempts, last_retried_at: nowIso, updated_at: nowIso })
         .eq("id", jobId);
-    }
-
-    if (decision.pauseSite) {
-      await supabase
-        .from("sites")
-        .update({ paused_at: nowIso, paused_reason: decision.class, updated_at: nowIso })
-        .eq("id", job.site_id);
-    }
-    if (decision.alert) {
-      await sendAlert(
-        `[Cockpit SEO] Job ${decision.class}`,
-        `Site ${site.name} (${site.id})\nJob ${jobId}\nErreur: ${msg}`
-      );
     }
     return { ok: false, error: msg };
   }
