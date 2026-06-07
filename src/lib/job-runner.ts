@@ -5,7 +5,7 @@ import { analyzeSerp } from "./serp";
 import { generateBrief, writeArticle, editArticle, generateImagePrompt, refreshArticle, optimizeProductFull } from "./anthropic";
 import { generateCoverImage } from "./fal";
 import { assertNoAntiPatterns, assertPersonaIsolation } from "./guards";
-import { classifyError } from "./retry-classifier";
+import { classifyFailure, MAX_AUTO_RETRIES } from "./retry-classifier";
 import { sendAlert } from "./alerts";
 
 // Smoke test post-publish: poll HEAD sur l'URL canonique (court, compatible serverless).
@@ -243,45 +243,35 @@ export async function runJob(jobId: string): Promise<{ ok: boolean; error?: stri
 
     return { ok: true };
   } catch (e) {
-    const msg = e instanceof Error ? e.message : "unknown_error";
+    const failure = classifyFailure(e);
     const attempts = (job.attempts || 0) + 1;
-    const decision = classifyError(msg, attempts);
     const nowIso = new Date().toISOString();
 
-    if (decision.action === "retry") {
+    if (failure.bucket === "retry" && attempts <= MAX_AUTO_RETRIES) {
+      const delay = Math.min(60 * 2 ** attempts, 600);
       await supabase
         .from("site_jobs")
-        .update({
-          status: "pending",
-          error: msg,
-          attempts,
-          last_retried_at: nowIso,
-          scheduled_at: new Date(Date.now() + decision.delay_seconds * 1000).toISOString(),
-          updated_at: nowIso,
-        })
+        .update({ status: "pending", error: failure.message, attempts, last_retried_at: nowIso, scheduled_at: new Date(Date.now() + delay * 1000).toISOString(), updated_at: nowIso })
         .eq("id", jobId);
-    } else if (decision.action === "pause_site") {
+    } else if (failure.bucket === "paused") {
       await supabase
         .from("site_jobs")
-        .update({ status: "paused", error: msg, paused_reason: decision.reason, attempts, last_retried_at: nowIso, updated_at: nowIso })
+        .update({ status: "paused", error: failure.message, paused_reason: failure.reason, attempts, last_retried_at: nowIso, updated_at: nowIso })
         .eq("id", jobId);
-      await supabase
-        .from("sites")
-        .update({ paused_at: nowIso, paused_reason: decision.reason, updated_at: nowIso })
-        .eq("id", job.site_id);
-      await sendAlert(`[Cockpit SEO] Site mis en pause: ${site.name}`, `Raison: ${decision.reason}\nJob ${jobId}\nErreur: ${msg}`);
-    } else if (decision.action === "pause_job") {
-      await supabase
-        .from("site_jobs")
-        .update({ status: "paused", error: msg, paused_reason: decision.reason, attempts, last_retried_at: nowIso, updated_at: nowIso })
-        .eq("id", jobId);
-      await sendAlert(`[Cockpit SEO] Job en pause: ${site.name}`, `Raison: ${decision.reason}\nErreur: ${msg}`);
+      // pause le site pour les raisons globales (credits, creds invalides)
+      if (failure.reason.endsWith("_credit") || failure.reason === "invalid_credentials") {
+        await supabase
+          .from("sites")
+          .update({ paused_at: nowIso, paused_reason: failure.reason, updated_at: nowIso })
+          .eq("id", job.site_id);
+      }
+      await sendAlert(`[Cockpit SEO] Pause: ${site.name}`, `Raison: ${failure.reason}\nJob ${jobId}\n${failure.message}`);
     } else {
       await supabase
         .from("site_jobs")
-        .update({ status: "error", error: msg, paused_reason: decision.reason, attempts, last_retried_at: nowIso, updated_at: nowIso })
+        .update({ status: "error", error: failure.message, attempts, last_retried_at: nowIso, updated_at: nowIso })
         .eq("id", jobId);
     }
-    return { ok: false, error: msg };
+    return { ok: false, error: failure.message };
   }
 }
