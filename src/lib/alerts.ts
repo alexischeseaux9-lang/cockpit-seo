@@ -7,7 +7,7 @@ export async function sendAlert(subject: string, body: string): Promise<void> {
 
 async function sendResend(subject: string, body: string): Promise<void> {
   const key = process.env.RESEND_API_KEY;
-  const to = process.env.ALERT_EMAIL;
+  const to = process.env.ADMIN_EMAIL || process.env.ALERT_EMAIL;
   if (!key || !to) return;
   try {
     await fetch("https://api.resend.com/emails", {

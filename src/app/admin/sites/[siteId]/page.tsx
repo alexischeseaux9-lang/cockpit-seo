@@ -115,21 +115,34 @@ export default function SiteDetail({ params }: { params: { siteId: string } }) {
         </Link>
 
         {site && (
-          <div className="mb-5 flex items-center gap-3">
-            <h1 className="text-xl font-semibold">{site.name}</h1>
-            {site.voice_profile?.content_language ? (
-              <span className="flex items-center gap-1.5 rounded-full border border-emerald-700 bg-emerald-950/40 px-2.5 py-0.5 text-xs capitalize text-emerald-300">
-                <Globe size={12} /> {site.voice_profile.content_language}
-              </span>
-            ) : (
-              <span className="flex items-center gap-1.5 rounded-full border border-amber-700 bg-amber-950/40 px-2.5 py-0.5 text-xs text-amber-300">
-                <Globe size={12} /> Langue non definie, va dans Profil
-              </span>
-            )}
-          </div>
+          <>
+            <div className="mb-3 flex items-center gap-3">
+              <h1 className="text-xl font-semibold">{site.name}</h1>
+              {site.voice_profile?.content_language ? (
+                <span className="flex items-center gap-1.5 rounded-full border border-emerald-700 bg-emerald-950/40 px-2.5 py-0.5 text-xs capitalize text-emerald-300">
+                  <Globe size={12} /> {site.voice_profile.content_language}
+                </span>
+              ) : (
+                <span className="flex items-center gap-1.5 rounded-full border border-amber-700 bg-amber-950/40 px-2.5 py-0.5 text-xs text-amber-300">
+                  <Globe size={12} /> Langue non definie, va dans Profil
+                </span>
+              )}
+            </div>
+            <div className="mb-5 flex flex-wrap items-center gap-3 rounded-lg border border-zinc-800 bg-zinc-900/40 px-4 py-2.5 text-sm">
+              {site.connection_status === "connected" ? (
+                <span className="flex items-center gap-1.5 text-emerald-400"><CheckCircle2 size={14} /> Connecte</span>
+              ) : (
+                <span className="flex items-center gap-1.5 text-red-400"><Globe size={14} /> {site.connection_status}{site.connection_error ? `: ${site.connection_error}` : ""}</span>
+              )}
+              <span className="text-zinc-500">·</span>
+              <span className="text-zinc-400">{site.platform}</span>
+              <a href={site.url} target="_blank" rel="noreferrer" className="flex items-center gap-1 text-zinc-400 hover:text-emerald-400">{site.url} <ExternalLink size={12} /></a>
+              <a href={`/portail/${site.client_view_token}`} target="_blank" rel="noreferrer" className="ml-auto text-xs text-emerald-400">Portail client</a>
+            </div>
+          </>
         )}
 
-        <div className="mb-6 flex flex-wrap gap-1 border-b border-zinc-800">
+        <div className="sticky top-0 z-10 mb-6 flex flex-wrap gap-1 border-b border-zinc-800 bg-zinc-950/95 backdrop-blur">
           {TABS.map((t) => (
             <button
               key={t.id}

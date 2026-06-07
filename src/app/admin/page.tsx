@@ -18,6 +18,8 @@ import {
   Sparkles,
 } from "lucide-react";
 import { ConnectModal } from "./connect-modal";
+import { Sparkline } from "./_components/sparkline";
+import { SiteHealthChip } from "./_components/site-health-chip";
 import { VERSION } from "@/lib/version";
 
 type Health = {
@@ -25,6 +27,8 @@ type Health = {
   errors_24h: number;
   published: number;
   last_published_at: string | null;
+  sparkline: number[];
+  level: string;
 };
 
 type Site = {
@@ -34,6 +38,7 @@ type Site = {
   platform: string;
   connection_status: string;
   voice_profile?: { content_language?: string };
+  client_view_token?: string;
   health: Health;
 };
 
@@ -64,6 +69,7 @@ export default function AdminPage() {
   const [showAdd, setShowAdd] = useState(false);
   const [newName, setNewName] = useState("");
   const [newUrl, setNewUrl] = useState("");
+  const [needsAttention, setNeedsAttention] = useState(false);
 
   useEffect(() => {
     const saved = typeof window !== "undefined" ? localStorage.getItem(PW_KEY) : null;
@@ -171,6 +177,12 @@ export default function AdminPage() {
               <RefreshCw size={16} className={loading ? "animate-spin" : ""} /> Rafraichir
             </button>
             <button
+              onClick={() => setNeedsAttention((v) => !v)}
+              className={`flex items-center gap-2 rounded-lg border px-3 py-2 text-sm ${needsAttention ? "border-amber-600 text-amber-300" : "border-zinc-700 text-zinc-300"}`}
+            >
+              Needs attention
+            </button>
+            <button
               onClick={() => setShowAdd(true)}
               className="flex items-center gap-2 rounded-lg bg-emerald-600 px-3 py-2 text-sm font-medium hover:bg-emerald-500"
             >
@@ -195,7 +207,7 @@ export default function AdminPage() {
         )}
 
         <div className="grid gap-4 sm:grid-cols-2">
-          {sites.map((site) => (
+          {sites.filter((s) => !needsAttention || s.health.level !== "green").map((site) => (
             <div
               key={site.id}
               className="rounded-lg border border-zinc-800 bg-zinc-900/40 p-4"
@@ -211,6 +223,7 @@ export default function AdminPage() {
                   <p className="text-xs text-zinc-500">{site.url}</p>
                 </div>
                 <div className="flex flex-col items-end gap-1">
+                  <SiteHealthChip level={site.health.level} />
                   <span className="rounded border border-zinc-700 px-1.5 py-0.5 text-xs text-zinc-400">
                     {site.platform}
                   </span>
@@ -243,6 +256,11 @@ export default function AdminPage() {
                 </div>
               </div>
 
+              <div className="mb-3 flex items-center justify-between text-emerald-400">
+                <Sparkline data={site.health.sparkline || []} />
+                <span className="text-xs text-zinc-500">14j</span>
+              </div>
+
               <div className="flex items-center justify-between border-t border-zinc-800 pt-3">
                 {site.connection_status === "connected" ? (
                   <span className="flex items-center gap-1.5 text-sm text-emerald-400">
@@ -256,12 +274,24 @@ export default function AdminPage() {
                     <Link2 size={14} /> Connecter Shopify
                   </button>
                 )}
-                <Link
-                  href={`/admin/sites/${site.id}`}
-                  className="flex items-center gap-1 rounded-lg bg-zinc-800 px-3 py-1.5 text-sm font-medium text-zinc-100 hover:bg-zinc-700"
-                >
-                  Ouvrir <ChevronRight size={14} />
-                </Link>
+                <div className="flex items-center gap-2">
+                  {site.client_view_token && (
+                    <a
+                      href={`/portail/${site.client_view_token}`}
+                      target="_blank"
+                      rel="noreferrer"
+                      className="text-xs text-zinc-500 hover:text-emerald-400"
+                    >
+                      Portail
+                    </a>
+                  )}
+                  <Link
+                    href={`/admin/sites/${site.id}`}
+                    className="flex items-center gap-1 rounded-lg bg-zinc-800 px-3 py-1.5 text-sm font-medium text-zinc-100 hover:bg-zinc-700"
+                  >
+                    Ouvrir <ChevronRight size={14} />
+                  </Link>
+                </div>
               </div>
             </div>
           ))}
