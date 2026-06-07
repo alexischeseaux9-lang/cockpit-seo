@@ -22,6 +22,8 @@ export async function logChange(opts: {
   target_url?: string;
   before_value?: string;
   after_value?: string;
+  before_meta?: Record<string, any>;
+  after_meta?: Record<string, any>;
   note?: string;
   source?: "manual" | "ai" | "system";
 }) {
@@ -35,6 +37,8 @@ export async function logChange(opts: {
     target_url: opts.target_url,
     before_value: opts.before_value,
     after_value: opts.after_value,
+    before_meta: opts.before_meta,
+    after_meta: opts.after_meta,
     note: opts.note,
     source: opts.source || "ai",
   });

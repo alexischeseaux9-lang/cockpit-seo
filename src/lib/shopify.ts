@@ -81,6 +81,16 @@ export async function listProducts(shop: string, token: string, limit = 50): Pro
   }));
 }
 
+export async function getProduct(shop: string, token: string, productId: string | number): Promise<ShopifyProduct | null> {
+  const res = await fetch(`${apiBase(shop)}/products/${productId}.json`, {
+    headers: { "X-Shopify-Access-Token": token },
+    cache: "no-store",
+  });
+  if (!res.ok) return null;
+  const p = (await res.json()).product;
+  return { id: p.id, title: p.title, handle: p.handle, body_html: p.body_html || "", image: p.image?.src || null };
+}
+
 export async function updateProduct(
   shop: string,
   token: string,

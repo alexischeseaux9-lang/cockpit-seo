@@ -18,6 +18,7 @@ import {
   User,
   Wand2,
   UploadCloud,
+  Undo2,
 } from "lucide-react";
 
 const PW_KEY = "cockpit_admin_pw";
@@ -267,6 +268,11 @@ function ProductsTab({ siteId, api, setMsg }: { siteId: string; api: ApiFn; setM
     const { ok, json } = await api(`/api/admin/sites/${siteId}/products/apply`, { method: "POST", body: JSON.stringify({ external_id: id }) });
     setBusy(null); setMsg(ok ? "Fiche produit mise a jour." : `Erreur: ${json.error}`); load();
   }
+  async function revert(id: string) {
+    setBusy(id + "r"); setMsg("Restauration de la version d'origine...");
+    const { ok, json } = await api(`/api/admin/sites/${siteId}/products/revert`, { method: "POST", body: JSON.stringify({ external_id: id }) });
+    setBusy(null); setMsg(ok ? "Version d'origine restauree." : `Erreur: ${json.error}`); load();
+  }
 
   if (loading) return <p className="text-sm text-zinc-400"><Loader2 size={14} className="inline animate-spin" /> Chargement des produits Shopify...</p>;
   return (
@@ -288,6 +294,11 @@ function ProductsTab({ siteId, api, setMsg }: { siteId: string; api: ApiFn; setM
             {(p.status === "proposed" || p.status === "applied") && (
               <button onClick={() => apply(p.external_id)} disabled={busy === p.external_id + "p"} className={ghostBtn}>
                 {busy === p.external_id + "p" ? <Loader2 size={12} className="animate-spin" /> : <UploadCloud size={12} />} Appliquer
+              </button>
+            )}
+            {p.status === "applied" && (
+              <button onClick={() => revert(p.external_id)} disabled={busy === p.external_id + "r"} className={ghostBtn} title="Restaurer la version d'origine">
+                {busy === p.external_id + "r" ? <Loader2 size={12} className="animate-spin" /> : <Undo2 size={12} />} Annuler
               </button>
             )}
           </div>
