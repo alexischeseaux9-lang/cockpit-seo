@@ -34,7 +34,7 @@ export async function POST(req: NextRequest, { params }: { params: { siteId: str
           quality_score: score, quality_breakdown: breakdown, audit_at: now,
           generation_metadata: { kind: c.kind }, updated_at: now,
         },
-        { onConflict: "site_id,platform,kind,external_id" }
+        { onConflict: "site_id,platform,external_id" }
       );
     }
 
