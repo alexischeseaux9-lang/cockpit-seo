@@ -13,6 +13,10 @@ const schema = z.object({
   site_id: z.string().uuid(),
   shop_domain: z.string().min(1),
   access_token: z.string().min(1),
+  // Optionnels : permettent de regenerer un access token via le
+  // client_credentials grant Shopify quand le token expire (utilise en M2).
+  client_id: z.string().optional(),
+  client_secret: z.string().optional(),
 });
 
 export async function POST(req: NextRequest) {
@@ -27,12 +31,12 @@ export async function POST(req: NextRequest) {
     return NextResponse.json({ error: parsed.error.flatten() }, { status: 400 });
   }
 
-  const { site_id, shop_domain, access_token } = parsed.data;
+  const { site_id, shop_domain, access_token, client_id, client_secret } = parsed.data;
 
   let credentials_encrypted: string;
   try {
     credentials_encrypted = encrypt(
-      JSON.stringify({ platform: "shopify", shop_domain, access_token })
+      JSON.stringify({ platform: "shopify", shop_domain, access_token, client_id, client_secret })
     );
   } catch (e) {
     return NextResponse.json(
