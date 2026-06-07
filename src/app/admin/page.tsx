@@ -20,7 +20,9 @@ import {
 import { ConnectModal } from "./connect-modal";
 import { Sparkline } from "./_components/sparkline";
 import { SiteHealthChip } from "./_components/site-health-chip";
-import { VERSION } from "@/lib/version";
+import { Kpi } from "./_components/ui";
+import { cn } from "@/lib/format";
+import { VERSION, BRAND } from "@/lib/version";
 
 type Health = {
   pending: number;
@@ -125,11 +127,14 @@ export default function AdminPage() {
 
   if (!authed) {
     return (
-      <main className="flex min-h-screen items-center justify-center bg-zinc-950 px-4">
-        <div className="w-full max-w-sm rounded-lg border border-zinc-800 bg-zinc-900/40 p-6">
+      <main className="flex min-h-screen items-center justify-center px-4">
+        <div className="card-base w-full max-w-sm p-6">
           <div className="mb-4 flex items-center gap-2 text-zinc-100">
-            <Lock size={18} />
-            <h1 className="text-lg font-semibold">Cockpit SEO</h1>
+            <span className="flex h-9 w-9 items-center justify-center rounded-lg bg-emerald-500/15 text-emerald-300"><Lock size={17} /></span>
+            <div>
+              <h1 className="text-base font-semibold leading-tight">Cockpit SEO</h1>
+              <p className="text-xs text-zinc-500">Acces admin</p>
+            </div>
           </div>
           <input
             type="password"
@@ -137,16 +142,11 @@ export default function AdminPage() {
             onChange={(e) => setPassword(e.target.value)}
             onKeyDown={(e) => e.key === "Enter" && load(password)}
             placeholder="ADMIN_PASSWORD"
-            className="mb-3 w-full rounded-lg border border-zinc-800 bg-zinc-900 px-3 py-2 text-zinc-100 outline-none focus:border-emerald-500"
+            className="input-base mb-3"
           />
           {error && <p className="mb-3 text-sm text-red-400">{error}</p>}
-          <button
-            onClick={() => load(password)}
-            disabled={loading || !password}
-            className="flex w-full items-center justify-center gap-2 rounded-lg bg-emerald-600 px-4 py-2 font-medium text-white hover:bg-emerald-500 disabled:opacity-40"
-          >
-            {loading ? <Loader2 size={18} className="animate-spin" /> : null}
-            Entrer
+          <button onClick={() => load(password)} disabled={loading || !password} className="btn-primary w-full">
+            {loading ? <Loader2 size={16} className="animate-spin" /> : null} Entrer
           </button>
         </div>
       </main>
@@ -154,62 +154,33 @@ export default function AdminPage() {
   }
 
   return (
-    <main className="min-h-screen bg-zinc-950 px-6 py-8 text-zinc-100">
-      <div className="mx-auto max-w-5xl">
-        <div className="mb-8 flex items-center justify-between">
+    <main className="min-h-screen px-6 py-8 text-zinc-100">
+      <div className="mx-auto max-w-6xl">
+        <div className="mb-8 flex flex-wrap items-center justify-between gap-3">
           <div className="flex items-center gap-3">
-            <Activity size={22} className="text-emerald-400" />
-            <h1 className="text-xl font-semibold">Cockpit SEO</h1>
-            <span className="rounded border border-zinc-700 px-1.5 py-0.5 text-xs text-zinc-400">
-              {VERSION}
-            </span>
+            <span className="flex h-9 w-9 items-center justify-center rounded-lg bg-emerald-500/15 text-emerald-300"><Activity size={18} /></span>
+            <h1 className="text-xl font-semibold tracking-tight">{BRAND}</h1>
+            <span className="rounded-md border border-white/10 px-1.5 py-0.5 text-xs text-zinc-400">{VERSION}</span>
           </div>
-          <div className="flex items-center gap-2">
-            <Link
-              href="/admin/onboarding-wizard"
-              className="flex items-center gap-2 rounded-lg border border-zinc-700 px-3 py-2 text-sm text-zinc-300 hover:border-emerald-500"
-            >
-              <Sparkles size={16} /> Onboarding
-            </Link>
-            <button
-              onClick={() => load(password)}
-              className="flex items-center gap-2 rounded-lg border border-zinc-700 px-3 py-2 text-sm text-zinc-300 hover:border-zinc-500"
-            >
-              <RefreshCw size={16} className={loading ? "animate-spin" : ""} /> Rafraichir
-            </button>
-            <button
-              onClick={() => setNeedsAttention((v) => !v)}
-              className={`flex items-center gap-2 rounded-lg border px-3 py-2 text-sm ${needsAttention ? "border-amber-600 text-amber-300" : "border-zinc-700 text-zinc-300"}`}
-            >
-              Needs attention
-            </button>
-            <button
-              onClick={() => setShowAdd(true)}
-              className="flex items-center gap-2 rounded-lg bg-emerald-600 px-3 py-2 text-sm font-medium hover:bg-emerald-500"
-            >
-              <Plus size={16} /> Ajouter un site
-            </button>
+          <div className="flex flex-wrap items-center gap-2">
+            <Link href="/admin/onboarding-wizard" className="btn-ghost"><Sparkles size={15} /> Onboarding</Link>
+            <button onClick={() => load(password)} className="btn-ghost"><RefreshCw size={15} className={loading ? "animate-spin" : ""} /> Rafraichir</button>
+            <button onClick={() => setNeedsAttention((v) => !v)} className={cn("btn-ghost", needsAttention && "border-amber-500/40 text-amber-300")}>Needs attention</button>
+            <button onClick={() => setShowAdd(true)} className="btn-primary"><Plus size={15} /> Ajouter un site</button>
           </div>
         </div>
 
         {!loading && sites.length > 0 && (
           <div className="mb-6 grid grid-cols-2 gap-3 sm:grid-cols-4">
-            {[
-              { label: "Sites", value: String(sites.length) },
-              { label: "Connectes", value: String(sites.filter((s) => s.connection_status === "connected").length) },
-              { label: "Articles publies", value: String(sites.reduce((a, s) => a + (s.health.published || 0), 0)) },
-              { label: "Cout IA (mois)", value: "$" + sites.reduce((a, s) => a + (s.health.cost_mtd_usd || 0), 0).toFixed(2) },
-            ].map((k) => (
-              <div key={k.label} className="rounded-lg border border-zinc-800 bg-zinc-900/40 p-4">
-                <div className="text-[11px] uppercase tracking-wider text-zinc-500">{k.label}</div>
-                <div className="mt-1 text-2xl font-semibold text-zinc-100">{k.value}</div>
-              </div>
-            ))}
+            <Kpi label="Sites" value={sites.length} />
+            <Kpi label="Connectes" value={sites.filter((s) => s.connection_status === "connected").length} tone="accent" />
+            <Kpi label="Articles publies" value={sites.reduce((a, s) => a + (s.health.published || 0), 0)} />
+            <Kpi label="Cout IA (mois)" value={"$" + sites.reduce((a, s) => a + (s.health.cost_mtd_usd || 0), 0).toFixed(2)} />
           </div>
         )}
 
         {warning === "supabase_not_configured" && (
-          <p className="mb-6 rounded-lg border border-amber-900 bg-amber-950/40 p-3 text-sm text-amber-300">
+          <p className="mb-6 rounded-xl border border-amber-500/30 bg-amber-500/[0.05] p-3 text-sm text-amber-200">
             Supabase pas encore configure. Renseigne NEXT_PUBLIC_SUPABASE_URL et
             SUPABASE_SERVICE_ROLE_KEY dans .env.local puis applique la migration 0001_init.sql.
           </p>
@@ -218,34 +189,24 @@ export default function AdminPage() {
         {loading && <p className="text-zinc-400">Chargement...</p>}
 
         {!loading && sites.length === 0 && !warning && (
-          <div className="rounded-lg border border-zinc-800 bg-zinc-900/40 p-8 text-center text-zinc-400">
-            Aucun site. Clique sur Ajouter un site pour commencer.
+          <div className="rounded-xl border border-dashed border-white/10 bg-white/[0.01] p-10 text-center text-sm text-zinc-500">
+            Aucun site. Clique sur &quot;Ajouter un site&quot; pour commencer.
           </div>
         )}
 
         <div className="grid gap-4 sm:grid-cols-2">
           {sites.filter((s) => !needsAttention || s.health.level !== "green").map((site) => (
-            <div
-              key={site.id}
-              className="rounded-lg border border-zinc-800 bg-zinc-900/40 p-4"
-            >
-              <div className="mb-3 flex items-start justify-between">
-                <div>
-                  <Link
-                    href={`/admin/sites/${site.id}`}
-                    className="font-medium text-zinc-100 hover:text-emerald-400"
-                  >
-                    {site.name}
-                  </Link>
-                  <p className="text-xs text-zinc-500">{site.url}</p>
+            <div key={site.id} className="card-base card-hover">
+              <div className="mb-3 flex items-start justify-between gap-3">
+                <div className="min-w-0">
+                  <Link href={`/admin/sites/${site.id}`} className="font-medium text-zinc-100 hover:text-emerald-400">{site.name}</Link>
+                  <p className="truncate text-xs text-zinc-500">{site.url}</p>
                 </div>
-                <div className="flex flex-col items-end gap-1">
+                <div className="flex shrink-0 flex-col items-end gap-1">
                   <SiteHealthChip level={site.health.level} />
-                  <span className="rounded border border-zinc-700 px-1.5 py-0.5 text-xs text-zinc-400">
-                    {site.platform}
-                  </span>
+                  <span className="rounded-md border border-white/10 px-1.5 py-0.5 text-xs capitalize text-zinc-400">{site.platform}</span>
                   {site.voice_profile?.content_language && (
-                    <span className="flex items-center gap-1 rounded border border-emerald-800 px-1.5 py-0.5 text-xs capitalize text-emerald-400">
+                    <span className="flex items-center gap-1 rounded-md border border-emerald-500/30 px-1.5 py-0.5 text-xs capitalize text-emerald-400">
                       <Globe size={11} /> {site.voice_profile.content_language}
                     </span>
                   )}
@@ -253,24 +214,10 @@ export default function AdminPage() {
               </div>
 
               <div className="mb-4 grid grid-cols-2 gap-2 text-sm">
-                <div className="flex items-center gap-1.5 text-zinc-300">
-                  <FileText size={14} className="text-zinc-500" />
-                  {site.health.published} publies
-                </div>
-                <div className="flex items-center gap-1.5 text-zinc-300">
-                  <Clock size={14} className="text-zinc-500" />
-                  {site.health.pending} en file
-                </div>
-                <div className={`flex items-center gap-1.5 ${healthColor(site.health.errors_24h)}`}>
-                  <AlertTriangle size={14} />
-                  {site.health.errors_24h} err/24h
-                </div>
-                <div className={`flex items-center gap-1.5 ${staleness(site.health.last_published_at)}`}>
-                  <Activity size={14} />
-                  {site.health.last_published_at
-                    ? new Date(site.health.last_published_at).toLocaleDateString()
-                    : "jamais"}
-                </div>
+                <div className="flex items-center gap-1.5 text-zinc-300"><FileText size={14} className="text-zinc-500" /> {site.health.published} publies</div>
+                <div className="flex items-center gap-1.5 text-zinc-300"><Clock size={14} className="text-zinc-500" /> {site.health.pending} en file</div>
+                <div className={cn("flex items-center gap-1.5", healthColor(site.health.errors_24h))}><AlertTriangle size={14} /> {site.health.errors_24h} err/24h</div>
+                <div className={cn("flex items-center gap-1.5", staleness(site.health.last_published_at))}><Activity size={14} /> {site.health.last_published_at ? new Date(site.health.last_published_at).toLocaleDateString() : "jamais"}</div>
               </div>
 
               <div className="mb-3 flex items-center justify-between text-emerald-400">
@@ -278,36 +225,17 @@ export default function AdminPage() {
                 <span className="text-xs text-zinc-500">14j · ${(site.health.cost_mtd_usd || 0).toFixed(2)}/mois</span>
               </div>
 
-              <div className="flex items-center justify-between border-t border-zinc-800 pt-3">
+              <div className="flex items-center justify-between border-t border-white/[0.06] pt-3">
                 {site.connection_status === "connected" ? (
-                  <span className="flex items-center gap-1.5 text-sm text-emerald-400">
-                    <CheckCircle2 size={14} /> Connecte
-                  </span>
+                  <span className="flex items-center gap-1.5 text-sm text-emerald-400"><CheckCircle2 size={14} /> Connecte</span>
                 ) : (
-                  <button
-                    onClick={() => setConnectFor(site)}
-                    className="flex items-center gap-1.5 rounded-lg border border-zinc-700 px-3 py-1.5 text-sm text-zinc-200 hover:border-emerald-500"
-                  >
-                    <Link2 size={14} /> Connecter Shopify
-                  </button>
+                  <button onClick={() => setConnectFor(site)} className="btn-ghost btn-sm"><Link2 size={14} /> Connecter</button>
                 )}
                 <div className="flex items-center gap-2">
                   {site.client_view_token && (
-                    <a
-                      href={`/portail/${site.client_view_token}`}
-                      target="_blank"
-                      rel="noreferrer"
-                      className="text-xs text-zinc-500 hover:text-emerald-400"
-                    >
-                      Portail
-                    </a>
+                    <a href={`/portail/${site.client_view_token}`} target="_blank" rel="noreferrer" className="text-xs text-zinc-500 hover:text-emerald-400">Portail</a>
                   )}
-                  <Link
-                    href={`/admin/sites/${site.id}`}
-                    className="flex items-center gap-1 rounded-lg bg-zinc-800 px-3 py-1.5 text-sm font-medium text-zinc-100 hover:bg-zinc-700"
-                  >
-                    Ouvrir <ChevronRight size={14} />
-                  </Link>
+                  <Link href={`/admin/sites/${site.id}`} className="btn-primary btn-sm">Ouvrir <ChevronRight size={14} /></Link>
                 </div>
               </div>
             </div>
@@ -316,35 +244,14 @@ export default function AdminPage() {
       </div>
 
       {showAdd && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 px-4">
-          <div className="w-full max-w-sm rounded-lg border border-zinc-800 bg-zinc-950 p-6">
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 px-4 backdrop-blur-sm" onClick={() => setShowAdd(false)}>
+          <div className="w-full max-w-sm rounded-xl border border-white/10 bg-[var(--bg-elev)] p-6" onClick={(e) => e.stopPropagation()}>
             <h2 className="mb-4 text-lg font-semibold">Nouveau site Shopify</h2>
-            <input
-              value={newName}
-              onChange={(e) => setNewName(e.target.value)}
-              placeholder="Nom du site"
-              className="mb-3 w-full rounded-lg border border-zinc-800 bg-zinc-900 px-3 py-2 outline-none focus:border-emerald-500"
-            />
-            <input
-              value={newUrl}
-              onChange={(e) => setNewUrl(e.target.value)}
-              placeholder="https://monshop.com"
-              className="mb-4 w-full rounded-lg border border-zinc-800 bg-zinc-900 px-3 py-2 outline-none focus:border-emerald-500"
-            />
+            <input value={newName} onChange={(e) => setNewName(e.target.value)} placeholder="Nom du site" className="input-base mb-3" />
+            <input value={newUrl} onChange={(e) => setNewUrl(e.target.value)} placeholder="https://monshop.com" className="input-base mb-4" />
             <div className="flex gap-2">
-              <button
-                onClick={addSite}
-                disabled={!newName || !newUrl}
-                className="flex-1 rounded-lg bg-emerald-600 px-4 py-2 font-medium hover:bg-emerald-500 disabled:opacity-40"
-              >
-                Creer
-              </button>
-              <button
-                onClick={() => setShowAdd(false)}
-                className="rounded-lg border border-zinc-700 px-4 py-2 text-zinc-300"
-              >
-                Annuler
-              </button>
+              <button onClick={addSite} disabled={!newName || !newUrl} className="btn-primary flex-1">Creer</button>
+              <button onClick={() => setShowAdd(false)} className="btn-ghost">Annuler</button>
             </div>
           </div>
         </div>

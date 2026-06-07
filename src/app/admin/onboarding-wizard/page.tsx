@@ -6,8 +6,8 @@ import Link from "next/link";
 import { ArrowLeft, Loader2, Sparkles, RefreshCw, CheckCircle2, ChevronRight } from "lucide-react";
 
 const PW_KEY = "cockpit_admin_pw";
-const inputCls = "w-full rounded-lg border border-zinc-800 bg-zinc-900 px-3 py-2 text-sm text-zinc-100 outline-none focus:border-emerald-500";
-const primaryBtn = "flex items-center gap-2 rounded-lg bg-emerald-600 px-4 py-2 text-sm font-medium hover:bg-emerald-500 disabled:opacity-40";
+const inputCls = "input-base";
+const primaryBtn = "btn-primary";
 
 const FIELDS: [string, string, boolean][] = [
   ["mascot", "Mascotte / persona auteur", false],
@@ -84,12 +84,12 @@ export default function OnboardingWizard() {
   }
 
   return (
-    <main className="min-h-screen bg-zinc-950 px-6 py-8 text-zinc-100">
+    <main className="min-h-screen px-6 py-8 text-zinc-100">
       <div className="mx-auto max-w-2xl">
-        <Link href="/admin" className="mb-4 flex items-center gap-1.5 text-sm text-zinc-400 hover:text-zinc-100">
+        <Link href="/admin" className="mb-4 inline-flex items-center gap-1.5 text-sm text-zinc-400 hover:text-zinc-100">
           <ArrowLeft size={16} /> Retour
         </Link>
-        <h1 className="mb-1 text-xl font-semibold">Onboarding d'un site</h1>
+        <h1 className="mb-1 text-xl font-semibold">Onboarding d&apos;un site</h1>
         <div className="mb-6 flex items-center gap-2 text-xs text-zinc-500">
           <span className={step >= 1 ? "text-emerald-400" : ""}>1. Decouverte</span>
           <ChevronRight size={12} />
@@ -98,7 +98,7 @@ export default function OnboardingWizard() {
           <span className={step >= 3 ? "text-emerald-400" : ""}>3. Connexion</span>
         </div>
 
-        {msg && <p className="mb-4 rounded-lg border border-zinc-800 bg-zinc-900/40 p-3 text-sm text-zinc-300">{msg}</p>}
+        {msg && <p className="mb-4 rounded-xl border border-white/10 bg-white/[0.03] p-3 text-sm text-zinc-300">{msg}</p>}
 
         {step === 1 && (
           <div className="space-y-4">

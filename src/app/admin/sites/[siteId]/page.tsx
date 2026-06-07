@@ -5,11 +5,11 @@ import Link from "next/link";
 import {
   ArrowLeft, RefreshCw, Loader2, Play, PlayCircle, Plus, ListPlus, FileText,
   CheckCircle2, Check, X, ExternalLink, Sparkles, Image as ImageIcon, Package,
-  FolderTree, History, User, UserCircle, Wand2, UploadCloud, Undo2, BarChart3,
+  FolderTree, History, UserCircle, Wand2, UploadCloud, Undo2,
   Globe, Archive, ShoppingBag, Map, Tag, Zap, ZapOff, Trash2, ChevronRight,
-  ChevronDown, AlertCircle, AlertTriangle, Clock, Hourglass, Search, Power,
-  Palette, Coffee, Briefcase, Camera, Shapes, Target, Brush, BookOpen, Users,
-  Crown, Network, Gift, ShieldCheck, ShieldOff, PlugZap, Unplug, CalendarDays,
+  AlertCircle, AlertTriangle, Clock, Hourglass, Search, Power,
+  Palette, Coffee, Briefcase, Camera, Shapes, Target, Brush, BookOpen,
+  Crown, Gift, ShieldOff, PlugZap, Unplug,
   Link2, Settings,
 } from "lucide-react";
 import { parseKeywordInput, type ParseResult } from "@/lib/sites/csv-parser";
@@ -18,18 +18,7 @@ import { Kpi, StatCard, StatusDot, Toggle, Drawer, Spinner, EmptyState, type Ton
 import { cn, relativeTime, formatDate, formatDateTime, daysSince } from "@/lib/format";
 import { BRAND } from "@/lib/version";
 
-const LANGUAGES = ["francais", "anglais", "allemand", "italien", "espagnol", "neerlandais"];
-
 const PW_KEY = "cockpit_admin_pw";
-
-type Job = {
-  id: string;
-  kind: string;
-  status: string;
-  keyword: string | null;
-  error: string | null;
-  output: any;
-};
 
 type TabId = "blog" | "archive" | "image" | "scro" | "roadmap" | "profil" | "products" | "categories" | "optimizations";
 
@@ -71,26 +60,6 @@ function ConnChip({ status }: { status?: string }) {
     </span>
   );
 }
-
-function Status({ status }: { status: string }) {
-  const map: Record<string, string> = {
-    pending: "text-zinc-400",
-    in_progress: "text-amber-400",
-    done: "text-emerald-400",
-    proposed: "text-amber-400",
-    applied: "text-emerald-400",
-    pushed: "text-emerald-400",
-    error: "text-red-400",
-    paused: "text-amber-400",
-    not_audited: "text-zinc-500",
-  };
-  return <span className={`text-xs ${map[status] || "text-zinc-400"}`}>{status}</span>;
-}
-
-const inputCls = "input-base";
-const cardCls = "card-base";
-const primaryBtn = "btn-primary";
-const ghostBtn = "btn-ghost btn-sm";
 
 export default function SiteDetail({ params }: { params: { siteId: string } }) {
   const siteId = params.siteId;
@@ -283,10 +252,6 @@ export default function SiteDetail({ params }: { params: { siteId: string } }) {
 }
 
 type ApiFn = (path: string, init?: RequestInit) => Promise<{ ok: boolean; json: any }>;
-
-function monthsSince(iso: string): number {
-  return (Date.now() - new Date(iso).getTime()) / (30 * 86_400_000);
-}
 
 const SEO_TITLE_MAX = 155;
 const SEO_DESC_MAX = 255;
@@ -514,9 +479,6 @@ function BlogTab({ siteId, site, api, setMsg }: { siteId: string; site: any; api
   );
 }
 
-function RefreshCwTab() {
-  return <Wand2 size={12} />;
-}
 
 const ROADMAP_TIMES = [8, 12, 18];
 function priorityLabel(p?: number | null): string {

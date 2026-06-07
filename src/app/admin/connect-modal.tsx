@@ -12,7 +12,7 @@ type Props = {
   onConnected: () => void;
 };
 
-const inputCls = "w-full rounded-lg border border-zinc-800 bg-zinc-900 px-3 py-2 text-zinc-100 outline-none focus:border-emerald-500";
+const inputCls = "input-base";
 
 export function ConnectModal({ siteId, siteName, platform = "shopify", password, onClose, onConnected }: Props) {
   const [f, setF] = useState<Record<string, string>>({});
@@ -45,11 +45,11 @@ export function ConnectModal({ siteId, siteName, platform = "shopify", password,
   }
 
   return (
-    <div className="fixed inset-0 z-50 flex justify-end bg-black/60">
-      <div className="h-full w-full max-w-md overflow-y-auto border-l border-zinc-800 bg-zinc-950 p-6">
-        <div className="mb-6 flex items-center justify-between">
-          <h2 className="text-lg font-semibold text-zinc-100">Connecter {platform} : {siteName}</h2>
-          <button onClick={onClose} className="text-zinc-400 hover:text-zinc-100"><X size={20} /></button>
+    <div className="fixed inset-0 z-50 flex justify-end bg-black/60 backdrop-blur-sm" onClick={onClose}>
+      <div className="h-full w-full max-w-md overflow-y-auto border-l border-white/10 bg-[var(--bg-elev)] p-6" onClick={(e) => e.stopPropagation()}>
+        <div className="mb-6 flex items-center justify-between gap-3">
+          <h2 className="text-base font-semibold text-zinc-100">Connecter {platform} : {siteName}</h2>
+          <button onClick={onClose} className="btn-icon h-8 w-8" aria-label="Fermer"><X size={16} /></button>
         </div>
 
         <div className="space-y-4">
@@ -80,10 +80,10 @@ export function ConnectModal({ siteId, siteName, platform = "shopify", password,
             </>
           )}
 
-          {error && <p className="rounded-lg border border-red-900 bg-red-950/50 p-3 text-sm text-red-300">{error}</p>}
+          {error && <p className="rounded-lg border border-red-500/30 bg-red-500/[0.06] p-3 text-sm text-red-300">{error}</p>}
 
-          <button onClick={submit} disabled={loading} className="flex w-full items-center justify-center gap-2 rounded-lg bg-emerald-600 px-4 py-2 font-medium text-white hover:bg-emerald-500 disabled:opacity-40">
-            {loading ? <Loader2 size={18} className="animate-spin" /> : <ShieldCheck size={18} />} Tester et connecter
+          <button onClick={submit} disabled={loading} className="btn-primary w-full">
+            {loading ? <Loader2 size={16} className="animate-spin" /> : <ShieldCheck size={16} />} Tester et connecter
           </button>
           <p className="text-xs text-zinc-500">Credentials chiffres AES-256-GCM, connexion testee en live avant stockage.</p>
         </div>

@@ -14,7 +14,7 @@ export default async function PortailPage({ params, searchParams }: { params: { 
     .maybeSingle();
 
   if (!site) {
-    return <main className="flex min-h-screen items-center justify-center bg-zinc-950 text-zinc-400">Lien invalide.</main>;
+    return <main className="flex min-h-screen items-center justify-center text-zinc-400">Lien invalide.</main>;
   }
 
   const kind = searchParams?.kind || "";
@@ -37,26 +37,26 @@ export default async function PortailPage({ params, searchParams }: { params: { 
     .eq("published", true);
 
   return (
-    <main className="min-h-screen bg-zinc-950 px-6 py-10 text-zinc-100">
+    <main className="min-h-screen px-6 py-10 text-zinc-100">
       <div className="mx-auto max-w-2xl">
-        <p className="text-xs uppercase tracking-wider text-zinc-500">Rapport de travail</p>
-        <h1 className="mb-1 text-2xl font-semibold">{site.name}</h1>
+        <p className="eyebrow">Rapport de travail</p>
+        <h1 className="mb-1 mt-1 text-2xl font-semibold tracking-tight">{site.name}</h1>
         <p className="mb-6 text-sm text-zinc-500">{site.url} · {published || 0} articles publies</p>
 
-        <div className="mb-6 flex flex-wrap gap-2">
-          <Link href={`/portail/${params.token}`} className={`rounded-full border px-2.5 py-1 text-xs ${!kind ? "border-emerald-600 text-emerald-300" : "border-zinc-700 text-zinc-400"}`}>Tout</Link>
+        <div className="mb-6 flex flex-wrap gap-1.5">
+          <Link href={`/portail/${params.token}`} className={!kind ? "inline-flex rounded-full border border-transparent bg-white px-3 py-1 text-xs font-medium text-black" : "inline-flex rounded-full border border-white/10 px-3 py-1 text-xs font-medium text-zinc-400 hover:text-zinc-200"}>Tout</Link>
           {kinds.map((k) => (
-            <Link key={k} href={`/portail/${params.token}?kind=${encodeURIComponent(k)}`} className={`rounded-full border px-2.5 py-1 text-xs ${kind === k ? "border-emerald-600 text-emerald-300" : "border-zinc-700 text-zinc-400"}`}>{k}</Link>
+            <Link key={k} href={`/portail/${params.token}?kind=${encodeURIComponent(k)}`} className={kind === k ? "inline-flex rounded-full border border-transparent bg-white px-3 py-1 text-xs font-medium text-black" : "inline-flex rounded-full border border-white/10 px-3 py-1 text-xs font-medium text-zinc-400 hover:text-zinc-200"}>{k}</Link>
           ))}
         </div>
 
         <div className="space-y-2">
           {(optimizations || []).length === 0 && <p className="text-sm text-zinc-500">Aucune activite.</p>}
           {(optimizations || []).map((o, i) => (
-            <div key={i} className="rounded-lg border border-zinc-800 bg-zinc-900/40 p-3">
-              <div className="flex items-center justify-between">
-                <span className="text-sm text-zinc-200">{o.target_title || o.kind}</span>
-                <span className="text-xs text-zinc-500">{new Date(o.done_at).toLocaleDateString()}</span>
+            <div key={i} className="card-base p-3">
+              <div className="flex items-center justify-between gap-3">
+                <span className="truncate text-sm text-zinc-200">{o.target_title || o.kind}</span>
+                <span className="shrink-0 text-xs text-zinc-500">{new Date(o.done_at).toLocaleDateString()}</span>
               </div>
               <p className="text-xs text-zinc-500">{o.kind} · {o.target_type}{o.note ? ` · ${o.note}` : ""}</p>
             </div>
