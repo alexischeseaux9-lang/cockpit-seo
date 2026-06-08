@@ -3,6 +3,7 @@ import { SerpAnalysis } from "./serp";
 import { stripEmDashes, findAntiPatterns } from "./guards";
 import { logAnthropicUsage } from "./ai-usage";
 import { expandAntiAiPatterns } from "./anti-ai";
+import { defaultBranding } from "./cro/builder";
 
 const SONNET = process.env.CLAUDE_MODEL || "claude-sonnet-4-6";
 const HAIKU = "claude-haiku-4-5";
@@ -481,10 +482,10 @@ export type ProductOptimized = {
 export async function optimizeProductFull(
   title: string,
   bodyHtml: string,
-  voiceProfile: Record<string, any>,
-  accent: string
+  voiceProfile: Record<string, any>
 ): Promise<ProductOptimized> {
   const c = client();
+  const br = defaultBranding(voiceProfile); // palette de marque complete (la meme que le SCRO blog)
   const lang = voiceProfile.content_language || "francais";
   const tone = voiceProfile.product_tone_description || voiceProfile.tone_description || "expert, concret, rassurant";
   const sys = `Tu es un redacteur CRO + SEO e-commerce expert (parite Yavok). Tu ecris en ${lang}. ${STYLE_RULES}
@@ -495,7 +496,7 @@ REGLES DURES:
 - Aucun em-dash ni en-dash, aucun emoji, aucun superlatif vide ("le meilleur", "incroyable", "revolutionnaire", "unique en son genre").
 - H2 et H3 OBLIGATOIRES. Chaque titre integre le mot-cle principal du produit ou une variante long-tail. JAMAIS de titre generique ("Description", "Caracteristiques", "Avantages", "Key Benefits", "Features"). Exemples: "Pourquoi {produit} change {usage}", "{produit}: {claim factuel et specifique}".
 - Icones uniquement en SVG inline line-art (viewBox='0 0 24 24', fill='none', stroke='currentColor', stroke-width='1.5', stroke-linecap='round'). Choisis des icones coherentes avec la NICHE du produit (deduis-la du titre et du contenu: maison/deco, sport, mode, outdoor, tech, bien-etre, etc.).
-- Couleur d'accent ${accent}: filets, badges, icones, separateurs.
+- PALETTE DE MARQUE a utiliser DANS le <style> (hex EXACTS, n'invente aucune autre couleur): accent (titres soulignes, badges, icones, liens, filets, separateurs, marqueurs FAQ, en-tetes de table) = ${br.accent}; accent fonce (hover, accents secondaires) = ${br.accentDark}; fond des cards et sections = ${br.cardBg}; bordures = ${br.border}; texte principal = ${br.textDark}; texte secondaire = ${br.textMuted}; etoiles et prix = ${br.ratingColor}.
 - IMPORTANT: dans le body_html, utilise des guillemets SIMPLES pour TOUS les attributs HTML (class='pp', style='...', viewBox='...') afin que le JSON reste valide.
 - Le body_html COMMENCE par un bloc <style> scope a la classe wrapper .pp qui rend la fiche responsive et premium SANS dependre du theme: .pp h2 font-size 1.75rem (1.5rem sous 640px), .pp h3 1.25rem, paragraphes aeres (line-height 1.7), grilles de cards, table stylee, accordeon FAQ via <details>/<summary>. Tout le contenu est enveloppe dans <div class='pp'>...</div>.
 

@@ -153,8 +153,7 @@ export async function runJob(jobId: string): Promise<{ ok: boolean; error?: stri
       const { data: audit } = await supabase
         .from("site_product_audits").select("*").eq("site_id", site.id).eq("external_id", extId).maybeSingle();
       if (!audit) throw new Error("audit_row_not_found");
-      const accent = voice.branding_accent_hex || "#10b981";
-      const opt = await optimizeProductFull(audit.current_title || audit.title || "", audit.current_body_html || "", voice, accent);
+      const opt = await optimizeProductFull(audit.current_title || audit.title || "", audit.current_body_html || "", voice);
       const nowIso = new Date().toISOString();
       await supabase.from("site_product_audits").update({
         proposed: opt, proposed_quality: opt.quality_score, proposed_at: nowIso, status: "proposed", updated_at: nowIso,
