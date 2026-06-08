@@ -99,16 +99,23 @@ export async function POST(req: NextRequest, { params }: { params: { siteId: str
       })
       .filter((x): x is InlineItem => x !== null);
 
-    // Fallback Yavok : si inline active mais aucun bloc valide configure, on remplit
-    // automatiquement avec les meilleurs produits (cartes produit dans le contenu).
-    if (inlineEnabled && inline.length === 0 && products.length) {
-      const labels = ["Coup de coeur", "Best-seller", "Notre selection"];
-      const positions: (number | "end")[] = [0.25, 0.5, 0.78];
-      inline = products.slice(0, 3).map((p, i) => ({
+    // Cartes produit variees dans le contenu (labels + icones differents, positions etalees).
+    // Style Buddhive : plusieurs recommandations qui changent tout au long de l'article.
+    // Declenche tant que l'utilisateur n'a pas configure >=2 blocs manuels.
+    if (inlineEnabled && inline.length < 2 && products.length) {
+      const varied: { label: string; icon: InlineItem["icon"] }[] = [
+        { label: "Top pick right now", icon: "trophy" },
+        { label: "Best seller", icon: "flame" },
+        { label: "Editor's choice", icon: "star" },
+        { label: "Reader favorite", icon: "heart" },
+      ];
+      const positions = [0.16, 0.4, 0.64, 0.86];
+      inline = products.slice(0, 4).map((p, i) => ({
         kind: "product",
         position: positions[i] ?? 0.5,
-        label: labels[i] ?? "Coup de coeur",
-        cta: "Voir le produit",
+        label: varied[i % varied.length].label,
+        icon: varied[i % varied.length].icon,
+        cta: "View product",
         title: p.title,
         url: `/products/${p.handle}`,
         image: p.image,
@@ -146,19 +153,8 @@ export async function POST(req: NextRequest, { params }: { params: { siteId: str
         : null,
     };
 
-    // Recommandations fin d'article : melange articles + produits + collections du site.
-    const recoArticles: RecoItem[] = articles.slice(0, 4).map((a) => ({ kind: "article", title: a.title, url: `/blogs/${blogHandle}/${a.handle}`, image: a.image }));
-    const recoProducts: RecoItem[] = products.slice(0, 4).map((p) => ({ kind: "product", title: p.title, url: `/products/${p.handle}`, image: p.image, price: p.price, compareAt: p.compareAt }));
-    const recoCollections: RecoItem[] = collections
-      .filter((c) => c.handle !== "frontpage" && (c.title || "").trim().toLowerCase() !== "home page")
-      .slice(0, 4)
-      .map((c) => ({ kind: "collection", title: c.title, url: `/collections/${c.handle}`, image: c.image }));
-    const recoItems: RecoItem[] = [];
-    for (let i = 0; i < 4 && recoItems.length < 6; i++) {
-      if (recoArticles[i]) recoItems.push(recoArticles[i]);
-      if (recoProducts[i] && recoItems.length < 6) recoItems.push(recoProducts[i]);
-      if (recoCollections[i] && recoItems.length < 6) recoItems.push(recoCollections[i]);
-    }
+    // Recommandations fin d'article : produits uniquement (top 4 du site), grille shoppy.
+    const recoItems: RecoItem[] = products.slice(0, 4).map((p) => ({ kind: "product", title: p.title, url: `/products/${p.handle}`, image: p.image, price: p.price, compareAt: p.compareAt }));
     const reco: RecoResolved = recoOn && recoItems.length ? { enabled: true, title: "You may also like", items: recoItems } : null;
 
     const liquid = buildScroLiquid({ inlineEnabled, sidebarEnabled, inline, sidebar, branding, currency, reco });

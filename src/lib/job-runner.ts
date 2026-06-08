@@ -103,6 +103,49 @@ export async function runJob(jobId: string): Promise<{ ok: boolean; error?: stri
       return { ok: true };
     }
 
+    // --- kind: regenerate_article (reecrit le corps en place, meme URL, structure complete) ---
+    if (job.kind === "regenerate_article") {
+      const articleId = job.target_external_id;
+      if (!articleId) throw new Error("missing_target_external_id");
+      const blogId = await getDefaultBlogId(creds.shop_domain, token);
+      const article = await getArticle(creds.shop_domain, token, blogId, articleId);
+      if (!article) throw new Error("article_not_found");
+
+      let lang = voice.content_language;
+      if (!lang) {
+        const loc = await getShopLocale(creds.shop_domain, token);
+        lang = LANG_LABEL[loc] || "anglais";
+      }
+      const voiceWithLang = { ...voice, content_language: lang };
+      const keyword: string = job.keyword || job.target_title || article.title;
+      const gl = lang === "francais" ? "fr" : "us";
+      const hl = lang === "francais" ? "fr" : "en";
+
+      const serp = await analyzeSerp(keyword, gl, hl);
+      const brief = await generateBrief(keyword, serp, voiceWithLang);
+      brief.title = article.title; // on conserve le titre existant de l'article
+
+      const written = await writeArticle(brief, keyword, voiceWithLang, defaultBranding(voice));
+      const extraBans = expandAntiAiPatterns(voice.anti_ai_patterns);
+      let body = await editArticle(written.body_html, extraBans);
+      assertNoAntiPatterns(body, extraBans);
+      try { body = await fillArticleImages(body, voice.image_style_hint || "", 5); } catch { /* publie sans les images inline */ }
+
+      await updateArticleBody(creds.shop_domain, token, blogId, articleId, body);
+      const nowIso = new Date().toISOString();
+      await supabase.from("site_optimizations").insert({
+        site_id: site.id, kind: "article_regenerated", target_type: "article",
+        target_id: String(articleId), target_title: article.title,
+        note: `Article regenere (structure complete) pour "${keyword}"`, source: "ai",
+      });
+      await supabase.from("site_jobs").update({
+        status: "done", output: { article_id: articleId, regenerated: true, title: article.title },
+        completed_at: nowIso, updated_at: nowIso,
+      }).eq("id", jobId);
+      await supabase.from("sites").update({ last_published_at: nowIso, updated_at: nowIso }).eq("id", site.id);
+      return { ok: true };
+    }
+
     // --- kind: optimize_product (Sonnet -> proposed) ---
     if (job.kind === "optimize_product") {
       const extId = job.target_external_id;

@@ -1,9 +1,10 @@
 // Builder des blocs CRO injectes dans le theme Shopify (sections/main-article.liquid).
 // Approche : un <style> + <script> places entre markers. Le script reconstruit la mise
 // en page de l'article (style Yavok/buddhive) : breadcrumb propre, meta date + temps de
-// lecture, layout 2 colonnes (contenu + sidebar qui defile), cartes produit aux positions
-// configurees, et une section de recommandations en fin d'article. Donnees (images, prix)
-// bakees au moment du push.
+// lecture, layout 2 colonnes (contenu + sidebar qui defile), cartes produit variees aux
+// positions etalees, recommandations produit en fin d'article et trust badges. Le CSS
+// stylise aussi les tables et la FAQ accordeon generees dans le corps par le writer.
+// Donnees (images, prix) bakees au moment du push.
 
 export const SCRO_START_MARKER = "<!-- YAVOK_SCRO_START -->";
 export const SCRO_END_MARKER = "<!-- YAVOK_SCRO_END -->";
@@ -47,6 +48,7 @@ export type InlineItem = {
   image: string | null;
   price?: string | null;
   compareAt?: string | null;
+  icon?: "trophy" | "flame" | "star" | "heart";
 };
 export type MiniProduct = { title: string; url: string; image: string | null; price?: string | null; compareAt?: string | null };
 export type MiniLink = { title: string; url: string; image?: string | null; count?: number };
@@ -58,7 +60,7 @@ export type SidebarResolved = {
   author?: SidebarConfig["author"] | null;
 };
 
-// Recommandations en fin d'article (articles + produits + collections du site).
+// Recommandations en fin d'article (produits du site, style grille shoppy).
 export type RecoItem = {
   kind: "product" | "article" | "collection";
   title: string;
@@ -68,6 +70,8 @@ export type RecoItem = {
   compareAt?: string | null;
 };
 export type RecoResolved = { enabled: boolean; title: string; items: RecoItem[] } | null;
+
+export type TrustBadge = { title: string; subtitle: string; icon: "shield" | "truck" | "lock" | "help" };
 
 // Palette de marque. Pilotee par voice_profile.branding (objet complet, editable
 // dans l'onglet SCRO). Fallback sur branding_accent_hex puis sur des valeurs neutres.
@@ -121,9 +125,30 @@ const SB_ICONS = {
   check: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6L9 17l-5-5"/></svg>',
   book: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"/></svg>',
 };
+// Icones de label des cartes inline (variete des blocs produit dans le contenu).
+const INLINE_ICONS: Record<string, string> = {
+  trophy: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M6 4h12v3a6 6 0 0 1-12 0V4z"/><path d="M6 6H4a2 2 0 0 0 0 4h2M18 6h2a2 2 0 0 1 0 4h-2M9 17h6M10 21h4M12 17v4"/></svg>',
+  flame: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2c1.2 3.6 4 5 4 8.5a4 4 0 0 1-8 0c0-1.2.5-2.2 1.2-3C9 9 9 6.5 12 2z"/></svg>',
+  star: '<svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 2l2.9 6.3 6.9.7-5.1 4.6 1.4 6.8L12 17.8 5.9 20.4l1.4-6.8L2.2 9l6.9-.7L12 2z"/></svg>',
+  heart: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M20.8 7.6a4.8 4.8 0 0 0-8.8-2.2A4.8 4.8 0 0 0 3.2 7.6c0 4.2 5.5 7.9 8.8 10.4 3.3-2.5 8.8-6.2 8.8-10.4z"/></svg>',
+};
 // Icones meta (date + temps de lecture), injectees brutes dans le script.
 const ICON_CAL = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="18" rx="2"/><path d="M16 2v4M8 2v4M3 10h18"/></svg>';
 const ICON_CLK = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg>';
+// Icones des trust badges (fin d'article).
+const TB_ICONS: Record<string, string> = {
+  shield: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3l8 3v6c0 5-3.5 8-8 9-4.5-1-8-4-8-9V6l8-3z"/><path d="M9 12l2 2 4-4"/></svg>',
+  truck: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M3 6h11v9H3zM14 9h4l3 3v3h-7z"/><circle cx="7" cy="18" r="1.8"/><circle cx="17.5" cy="18" r="1.8"/></svg>',
+  lock: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><rect x="4.5" y="10.5" width="15" height="10" rx="2"/><path d="M8 10.5V7a4 4 0 0 1 8 0v3.5"/></svg>',
+  help: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M9.5 9.5a2.5 2.5 0 1 1 3.5 2.3c-.8.4-1 .8-1 1.7M12 17h.01"/></svg>',
+};
+
+const DEFAULT_TRUST: TrustBadge[] = [
+  { title: "Authenticity Guaranteed", subtitle: "Premium work socks, built to last.", icon: "shield" },
+  { title: "Fast Delivery", subtitle: "Quick, tracked shipping on every order.", icon: "truck" },
+  { title: "Secure Payment", subtitle: "100% encrypted, safe checkout.", icon: "lock" },
+  { title: "Customer Service", subtitle: "A real team, ready to help.", icon: "help" },
+];
 
 // ---- CSS (scope .yv-*, couleurs interpolees depuis la palette) ----
 function styleBlock(br: Branding): string {
@@ -132,7 +157,8 @@ function styleBlock(br: Branding): string {
 .yv-card .yv-img{flex:0 0 150px}
 .yv-card .yv-img img{width:150px;height:150px;object-fit:cover;border-radius:12px;display:block}
 .yv-card .yv-bd{flex:1;min-width:0}
-.yv-card .yv-lbl{font-size:11px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:${br.accent}}
+.yv-card .yv-lbl{display:flex;align-items:center;gap:6px;font-size:11px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:${br.accent}}
+.yv-card .yv-lbl svg{width:14px;height:14px;flex:0 0 auto}
 .yv-card .yv-ttl{font-size:15px;font-weight:600;color:${br.textDark};margin:3px 0;line-height:1.3}
 .yv-card .yv-st{font-size:12px;color:${br.ratingColor};letter-spacing:1px}
 .yv-card .yv-st span{color:${br.textMuted};margin-left:5px;letter-spacing:0}
@@ -154,6 +180,20 @@ function styleBlock(br: Branding): string {
 .yv-content .article-template__hero-adapt{border-radius:16px;overflow:hidden}
 .yv-content .article-template__content-container{border-top:1px solid ${br.border};padding-top:26px!important;margin-top:4px}
 .article-template__content img{max-width:100%;height:auto}
+.article-template__content figure{margin:30px 0}
+.article-template__content figure img{border-radius:14px}
+/* Tables generees dans le corps (responsive : scroll horizontal sur mobile). */
+.article-template__content table{width:100%;border-collapse:collapse;font-size:15px;margin:6px 0}
+.article-template__content th{text-align:left;padding:12px 14px;font-weight:700;color:${br.textDark};background:#faf9f7;border-bottom:2px solid ${br.border}}
+.article-template__content td{padding:12px 14px;color:${br.textMuted};border-bottom:1px solid ${br.border};vertical-align:top}
+/* FAQ accordeon (details/summary) generee dans le corps. */
+.article-template__content .yv-faq{margin:34px 0}
+.yv-faq-item{border:1px solid ${br.border};border-radius:12px;margin-bottom:12px;background:${br.cardBg};overflow:hidden}
+.yv-faq-item summary{list-style:none;cursor:pointer;padding:16px 18px;font-weight:600;color:${br.textDark};font-size:16px;display:flex;justify-content:space-between;align-items:center;gap:14px}
+.yv-faq-item summary::-webkit-details-marker{display:none}
+.yv-faq-item summary::after{content:"+";font-size:22px;font-weight:400;color:${br.accent};line-height:1;transition:transform .2s;flex:0 0 auto}
+.yv-faq-item[open] summary::after{transform:rotate(45deg)}
+.yv-faq-item .yv-faq-a,.yv-faq-item summary + div{padding:0 18px 16px;color:${br.textMuted};line-height:1.65;font-size:15px}
 /* La sidebar defile avec l'article (pas de sticky). */
 .yv-aside{flex:0 0 320px;width:320px;align-self:flex-start;margin:0;font-family:inherit}
 .yv-lead-img{width:100%;height:160px;object-fit:cover;border-radius:10px;display:block;margin-bottom:14px}
@@ -193,35 +233,63 @@ function styleBlock(br: Branding): string {
 .yv-meta{display:flex;flex-wrap:wrap;gap:20px;align-items:center;margin:16px 0 2px;color:${br.textMuted};font-size:13px}
 .yv-meta .yv-mi{display:inline-flex;align-items:center;gap:7px}
 .yv-meta svg{width:15px;height:15px;color:${br.accent};flex:0 0 auto}
-/* Recommandations en fin d'article. */
+/* Recommandations produit en fin d'article. */
 .yv-reco{max-width:1160px;margin:48px auto 8px;padding:0 24px;box-sizing:border-box}
 .yv-reco h3{font-size:21px;font-weight:700;color:${br.textDark};margin:0 0 18px}
 .yv-reco-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:22px}
 .yv-rc{display:flex;flex-direction:column;text-decoration:none;border:1px solid ${br.border};border-radius:16px;overflow:hidden;background:${br.cardBg};transition:box-shadow .15s,transform .15s}
 .yv-rc:hover{box-shadow:0 8px 24px rgba(0,0,0,.09);transform:translateY(-2px)}
-.yv-rc-img{aspect-ratio:4/3;background:#f2f1ee;overflow:hidden}
+.yv-rc-img{aspect-ratio:1/1;background:#f2f1ee;overflow:hidden}
 .yv-rc-img img{width:100%;height:100%;object-fit:cover;display:block}
 .yv-rc-bd{padding:14px 15px 16px}
-.yv-rc-lbl{font-size:10px;font-weight:700;letter-spacing:.07em;text-transform:uppercase;color:${br.accent};margin-bottom:5px}
+.yv-rc-st{color:${br.ratingColor};font-size:12px;letter-spacing:1px;margin-bottom:4px}
 .yv-rc-ttl{font-size:14px;font-weight:600;color:${br.textDark};line-height:1.35}
-.yv-rc-pr{margin-top:9px;font-size:14px;font-weight:700;color:${br.textDark}}
+.yv-rc-pr{margin-top:9px;font-size:15px;font-weight:700;color:${br.textDark}}
 .yv-rc-pr s{font-weight:400;color:${br.textMuted};font-size:12px;margin-left:6px}
-@media(max-width:900px){.yv-layout{display:block;max-width:760px;padding:0 20px}.yv-aside{width:auto;margin:30px auto 0}.yv-breadcrumb,.yv-reco{padding:0 20px}}
+.yv-rc-bdg{font-size:10px;font-weight:700;color:#fff;background:${br.accent};border-radius:5px;padding:1px 6px;margin-left:6px;vertical-align:1px}
+.yv-rc-cta{display:inline-block;margin-top:10px;font-size:12px;font-weight:600;color:${br.accent}}
+/* Trust badges (fin d'article). */
+.yv-trust{max-width:1160px;margin:10px auto 0;padding:0 24px 8px;box-sizing:border-box}
+.yv-trust-grid{display:grid;grid-template-columns:repeat(4,1fr);gap:24px;border-top:1px solid ${br.border};padding-top:32px}
+.yv-tb{text-align:center}
+.yv-tb-ic{color:${br.accent};margin:0 auto 10px}
+.yv-tb-ic svg{width:38px;height:38px}
+.yv-tb h5{margin:0 0 5px;font-size:15px;font-weight:700;color:${br.textDark}}
+.yv-tb p{margin:0;font-size:13px;color:${br.textMuted};line-height:1.5}
+/* Mobile : lecture ultra confortable, cartes empilees, grilles compactes. */
+@media(max-width:900px){
+  .yv-layout{display:block;max-width:760px;padding:0 18px}
+  .yv-aside{width:auto;margin:30px auto 0}
+  .yv-breadcrumb,.yv-reco,.yv-trust{padding-left:18px;padding-right:18px}
+  .yv-card{flex-direction:column;align-items:stretch;gap:12px;padding:16px;margin:26px auto}
+  .yv-card .yv-img{flex:0 0 auto}
+  .yv-card .yv-img img{width:100%;height:auto;max-height:260px;border-radius:12px}
+  .yv-card .yv-cta{text-align:center}
+  .yv-reco-grid{grid-template-columns:repeat(2,1fr);gap:14px}
+  .yv-trust-grid{grid-template-columns:repeat(2,1fr);gap:26px 18px}
+  .article-template__content p{font-size:16.5px!important;line-height:1.72!important;margin-bottom:1.05em!important}
+  .article-template__content li{line-height:1.65}
+  .article-template__content figure{margin:22px 0!important}
+}
+@media(max-width:480px){
+  .yv-reco-grid{grid-template-columns:1fr}
+}
 </style>`;
 }
 
 function inlineCardHtml(it: InlineItem, sym: string): string {
   const img = sizedImg(it.image);
   const pct = discountPct(it.price, it.compareAt);
+  const ico = it.icon && INLINE_ICONS[it.icon] ? INLINE_ICONS[it.icon] : "";
   const priceRow =
     it.kind === "product" && it.price
       ? `<div class="yv-pr"><b>${esc(money(it.price, sym))}</b>${it.compareAt && pct > 0 ? `<s>${esc(money(it.compareAt, sym))}</s><span class="yv-bdg">-${pct}%</span>` : ""}</div>`
       : "";
-  const stars = it.kind === "product" ? `<div class="yv-st">${STARS} <span>Avis clients</span></div>` : "";
+  const stars = it.kind === "product" ? `<div class="yv-st">${STARS} <span>Customer Reviews</span></div>` : "";
   return `<div class="yv-card" data-cro-injected="1">
   ${img ? `<a class="yv-img" href="${esc(it.url)}"><img src="${esc(img)}" alt="${esc(it.title)}" loading="lazy" width="110" height="110"></a>` : ""}
   <div class="yv-bd">
-    <div class="yv-lbl">${esc(it.label)}</div>
+    <div class="yv-lbl">${ico}${esc(it.label)}</div>
     <div class="yv-ttl">${esc(it.title)}</div>
     ${stars}${priceRow}
     <a class="yv-cta" href="${esc(it.url)}">${esc(it.cta)} →</a>
@@ -267,17 +335,22 @@ function asideHtml(sb: SidebarResolved, sym: string): string {
 
 function recoCard(it: RecoItem, sym: string): string {
   const img = sizedImg(it.image, 480);
-  const label = it.kind === "article" ? "Article" : it.kind === "collection" ? "Collection" : "Product";
   const pct = discountPct(it.price, it.compareAt);
-  const price =
-    it.kind === "product" && it.price
-      ? `<div class="yv-rc-pr">${esc(money(it.price, sym))}${it.compareAt && pct > 0 ? `<s>${esc(money(it.compareAt, sym))}</s>` : ""}</div>`
-      : "";
-  return `<a class="yv-rc" href="${esc(it.url)}">${img ? `<div class="yv-rc-img"><img src="${esc(img)}" alt="${esc(it.title)}" loading="lazy"></div>` : ""}<div class="yv-rc-bd"><div class="yv-rc-lbl">${esc(label)}</div><div class="yv-rc-ttl">${esc(it.title)}</div>${price}</div></a>`;
+  const price = it.price
+    ? `<div class="yv-rc-pr">${esc(money(it.price, sym))}${it.compareAt && pct > 0 ? `<s>${esc(money(it.compareAt, sym))}</s><span class="yv-rc-bdg">-${pct}%</span>` : ""}</div>`
+    : "";
+  return `<a class="yv-rc" href="${esc(it.url)}">${img ? `<div class="yv-rc-img"><img src="${esc(img)}" alt="${esc(it.title)}" loading="lazy"></div>` : ""}<div class="yv-rc-bd"><div class="yv-rc-st">${STARS}</div><div class="yv-rc-ttl">${esc(it.title)}</div>${price}<span class="yv-rc-cta">View product →</span></div></a>`;
 }
 function recoHtml(reco: RecoResolved, sym: string): string {
   if (!reco || !reco.enabled || !reco.items.length) return "";
   return `<section class="yv-reco" data-cro-injected="1"><h3>${esc(reco.title || "You may also like")}</h3><div class="yv-reco-grid">${reco.items.map((it) => recoCard(it, sym)).join("")}</div></section>`;
+}
+
+function trustHtml(badges: TrustBadge[]): string {
+  if (!badges.length) return "";
+  return `<section class="yv-trust" data-cro-injected="1"><div class="yv-trust-grid">${badges
+    .map((b) => `<div class="yv-tb"><div class="yv-tb-ic">${TB_ICONS[b.icon] || TB_ICONS.shield}</div><h5>${esc(b.title)}</h5><p>${esc(b.subtitle)}</p></div>`)
+    .join("")}</div></section>`;
 }
 
 export function buildScroLiquid(opts: {
@@ -288,12 +361,14 @@ export function buildScroLiquid(opts: {
   branding: Branding;
   currency: string;
   reco?: RecoResolved;
+  trust?: TrustBadge[];
 }): string {
   const sym = currencySymbol(opts.currency || "USD");
   const inlineHtml = opts.inlineEnabled ? opts.inline.filter((it) => it.title && it.url).map((it) => inlineCardHtml(it, sym)) : [];
   const pcts = opts.inlineEnabled ? opts.inline.filter((it) => it.title && it.url).map((it) => (it.position === "end" ? null : Number(it.position))) : [];
   const aside = opts.sidebarEnabled ? asideHtml(opts.sidebar, sym) : "";
   const reco = recoHtml(opts.reco || null, sym);
+  const trust = trustHtml(opts.trust || DEFAULT_TRUST);
   if (!inlineHtml.length && !aside && !reco) return "";
 
   const script = `<script>
@@ -311,6 +386,7 @@ export function buildScroLiquid(opts: {
   var PCTS=${JSON.stringify(pcts)};
   var ASIDE=${JSON.stringify(aside)};
   var RECO=${JSON.stringify(reco)};
+  var TRUST=${JSON.stringify(trust)};
   function frag(html){return document.createRange().createContextualFragment(html);}
   function mkdiv(cls){var d=document.createElement('div'); d.className=cls; return d;}
   function escTxt(s){return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');}
@@ -353,20 +429,22 @@ export function buildScroLiquid(opts: {
   }
 
   // Layout 2 colonnes : tout l'article a gauche (760px), sidebar a droite qui defile.
+  var host=null;
   if(ASIDE){
     var art=content.closest('.article-template')||content.closest('article')||content.parentNode;
     art.setAttribute('data-yv-cro','1');
     var col=mkdiv('yv-content');
     while(art.firstChild){ col.appendChild(art.firstChild); }
-    // Sortir le breadcrumb au-dessus du layout (pleine largeur, aligne au layout).
     var bcw=null; var bcIn=col.querySelector('.yv-breadcrumb'); if(bcIn){ bcw=bcIn.closest('.article-block-padding')||bcIn; if(bcw.parentNode) bcw.parentNode.removeChild(bcw); }
     var lay=mkdiv('yv-layout'); lay.appendChild(col); lay.appendChild(frag(ASIDE));
     if(bcw) art.appendChild(bcw);
     art.appendChild(lay);
-    if(RECO) art.appendChild(frag(RECO));
-  } else if(RECO){
-    var p=content.parentNode; if(p) p.appendChild(frag(RECO));
+    host=art;
+  } else {
+    host=content.parentNode||content;
   }
+  if(RECO && host) host.appendChild(frag(RECO));
+  if(TRUST && host) host.appendChild(frag(TRUST));
 
   // Ne pas recommander l'article courant (le bloc est partage par toutes les pages).
   if(RECO){

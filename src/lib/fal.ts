@@ -51,9 +51,9 @@ export async function fillArticleImages(html: string, styleHint: string, cap = 4
       const desc = dm ? dm[1].replace(/&quot;/g, '"').replace(/&amp;/g, "&").slice(0, 400) : "";
       try {
         const url = await generateImage(
-          `Editorial blog photo. ${desc}. Style: ${style}. High quality, sharp focus, natural light, clean composition, no text, no words, no watermark.`,
+          `Editorial blog photo, wide horizontal composition. ${desc}. Style: ${style}. High quality, sharp focus, natural light, clean composition, no text, no words, no watermark.`,
           "fal-ai/flux/dev",
-          "landscape_4_3",
+          "landscape_16_9",
         );
         const newFig = fig.replace(/<img\b/i, `<img src="${url}"`).replace(/\sdata-gen="[^"]*"/i, "");
         return { fig, newFig };

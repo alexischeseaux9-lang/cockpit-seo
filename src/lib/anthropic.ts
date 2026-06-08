@@ -125,6 +125,8 @@ export async function writeArticle(
   const tplEssentials = `<div style="background:${b.cardBg};border:1px solid ${b.border};border-radius:16px;padding:14px;margin:30px 0;"><p style="text-align:center;font-weight:700;color:${b.accentDark};font-size:18px;margin:8px 0 14px;">TITLE</p><div style="display:flex;flex-direction:column;gap:8px;">${tplEssRow}</div></div>`;
   const tplDidYouKnow = `<div style="background:#eff6ff;border-left:4px solid #3b82f6;padding:18px 22px;border-radius:10px;margin:26px 0;"><p style="margin:0 0 8px;display:flex;align-items:center;gap:8px;font-weight:700;color:#1e40af;font-size:15px;"><span style="color:#3b82f6">${ICON_LIB.bulb}</span> Did you know?</p><p style="margin:0;color:#1e3a8a;line-height:1.6;">FACT</p></div>`;
   const tplFigure = `<figure style="margin:30px 0;"><img data-gen="DESCRIPTION_IMAGE_ANGLAIS_SANS_TEXTE" alt="ALT" style="width:100%;height:auto;border-radius:14px;display:block;background:#f1efe9;"><figcaption style="text-align:center;color:${b.textMuted};font-size:13px;margin-top:10px;font-style:italic;line-height:1.4;">LEGENDE</figcaption></figure>`;
+  const tplTable = `<div style="overflow-x:auto;margin:28px 0;"><table style="width:100%;border-collapse:collapse;font-size:15px;"><thead><tr style="background:#faf9f7;border-bottom:2px solid ${b.border};"><th style="text-align:left;padding:12px 14px;font-weight:700;color:${b.textDark};">COLONNE 1</th><th style="text-align:left;padding:12px 14px;font-weight:700;color:${b.textDark};">COLONNE 2</th><th style="text-align:left;padding:12px 14px;font-weight:700;color:${b.textDark};">COLONNE 3</th></tr></thead><tbody><tr style="border-bottom:1px solid ${b.border};"><td style="padding:12px 14px;font-weight:600;color:${b.textDark};">CELLULE</td><td style="padding:12px 14px;color:${b.textMuted};">CELLULE</td><td style="padding:12px 14px;color:${b.textMuted};">CELLULE</td></tr></tbody></table></div>`;
+  const tplFaq = `<div class="yv-faq"><details class="yv-faq-item"><summary>QUESTION ?</summary><div>REPONSE en 2 a 3 phrases.</div></details></div>`;
   const iconNames = Object.keys(ICON_LIB).filter((k) => k !== "star" && k !== "bulb").join(", ");
 
   const prompt = `Redige un article de blog premium, immersif et optimise SEO. Objectif: que le lecteur ait du plaisir a lire (rythme, visuels, encadres), pas juste un mur de texte.
@@ -141,11 +143,13 @@ REGLES DE STRUCTURE (a respecter dans l'ordre):
 2. Ouverture: 2 paragraphes courts qui accrochent des la 1ere phrase (pas de cliche).
 3. Juste apres, UN encadre "Key points at a glance" (4 a 6 puces resumant l'article).
 4. Ensuite UN encadre "essentials" (titre + 3 a 5 lignes a icone) qui met en avant les benefices/points cles pour le lecteur.
-5. Puis le corps: alterne <h2> + 2 a 3 paragraphes AERES (2 a 4 phrases chacun), <h3> et <ul><li> quand utile.
-6. Insere 3 a 4 visuels <figure> a des moments naturels (pas deux a la suite), chacun avec une description d'image precise et une legende.
+5. Puis le corps: alterne <h2> + paragraphes TRES courts (1 a 3 phrases chacun), <h3> et <ul><li> quand utile.
+6. Insere 4 a 5 visuels <figure> a des moments naturels (jamais deux a la suite), chacun avec une description d'image precise (cadrage horizontal) et une legende.
 7. Insere 1 a 2 encadres "Did you know?" avec un fait reellement interessant et verifiable.
-8. Termine par une section pratique et actionnable (jamais "en conclusion").
-9. Paragraphes courts, scannables. <strong> sur les idees cles.
+8. Insere UN tableau (composant [TABLE]) a un endroit pertinent: comparaison de matieres, de criteres ou d'options (2 a 4 colonnes, 3 a 6 lignes reelles).
+9. Termine le corps par une section pratique et actionnable (jamais "en conclusion").
+10. Tout a la fin, UNE FAQ de 4 a 6 questions/reponses en accordeon (composant [FAQ]), precedee d'un <h2> du type "Frequently asked questions".
+11. DENSITE (important): jamais deux gros blocs de texte qui se suivent. Entre les paragraphes, intercale souvent un visuel, un encadre, une liste, le tableau, un intertitre. Lecture MOBILE: tres aere, scannable, <strong> sur les idees cles. Le lecteur doit croiser un element visuel ou structurant tous les 1 a 2 paragraphes.
 
 COMPOSANTS A REUTILISER EXACTEMENT (copie le HTML tel quel, ne change QUE le texte; garde les couleurs et le style inline):
 
@@ -168,6 +172,12 @@ ${tplFigure}
 
 [DID YOU KNOW] (1 a 2 fois):
 ${tplDidYouKnow}
+
+[TABLE] (une fois; remplace entetes et cellules par du contenu reel, ajoute des <tr> selon le besoin; garde les styles inline):
+${tplTable}
+
+[FAQ] (une fois, tout a la fin, precedee d'un <h2>; repete le bloc <details class="yv-faq-item"> pour chaque question, 4 a 6 au total; garde les classes exactes):
+${tplFaq}
 
 Reponds UNIQUEMENT en JSON:
 { "body_html": "<le HTML complet de l'article avec les encadres, figures et callouts>", "excerpt": "resume de 2 phrases < 200 caracteres" }`;
