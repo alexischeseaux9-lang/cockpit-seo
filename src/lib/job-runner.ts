@@ -3,9 +3,10 @@ import { decryptCredentials } from "./credentials";
 import { ensureValidToken, getDefaultBlogId, publishArticle, getArticle, updateArticleBody } from "./shopify";
 import { analyzeSerp } from "./serp";
 import { generateBrief, writeArticle, editArticle, generateImagePrompt, refreshArticle, optimizeProductFull } from "./anthropic";
-import { generateCoverImage } from "./fal";
+import { generateCoverImage, fillArticleImages } from "./fal";
 import { assertNoAntiPatterns, assertPersonaIsolation } from "./guards";
 import { expandAntiAiPatterns } from "./anti-ai";
+import { defaultBranding } from "./cro/builder";
 import { classifyFailure, MAX_AUTO_RETRIES } from "./retry-classifier";
 import { sendAlert } from "./alerts";
 
@@ -142,12 +143,12 @@ export async function runJob(jobId: string): Promise<{ ok: boolean; error?: stri
     // 2. Brief
     const brief = await generateBrief(keyword, serp, voiceWithLang);
 
-    // 3. Writer
-    const written = await writeArticle(brief, keyword, voiceWithLang);
+    // 3. Writer (structure premium : encadres, figures, callouts, palette de marque)
+    const written = await writeArticle(brief, keyword, voiceWithLang, defaultBranding(voice));
 
     // 4. Editor + garde-fous
     const extraBans = expandAntiAiPatterns(voice.anti_ai_patterns);
-    const body = await editArticle(written.body_html, extraBans);
+    let body = await editArticle(written.body_html, extraBans);
     assertNoAntiPatterns(body, extraBans);
     assertPersonaIsolation({
       body,
@@ -155,6 +156,9 @@ export async function runJob(jobId: string): Promise<{ ok: boolean; error?: stri
       expectedFullName: voice.mascot || voice.author_name,
       forbiddenNames: voice.forbidden_author_names || [],
     });
+
+    // 4b. Images inline : remplit les <figure data-gen> par de vraies images IA (non bloquant).
+    try { body = await fillArticleImages(body, voice.image_style_hint || "", 4); } catch { /* on publie sans les images inline */ }
 
     // 5. Cover image
     let imageUrl: string | undefined;

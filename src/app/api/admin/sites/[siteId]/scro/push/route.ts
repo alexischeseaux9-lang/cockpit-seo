@@ -47,7 +47,7 @@ export async function POST(req: NextRequest, { params }: { params: { siteId: str
     if (needProducts) { try { products = await listProductsWithPrice(shop, token, 250); } catch { products = []; } }
     const pMap = new Map(products.map((p) => [p.handle, p]));
 
-    let collections: { id: number; handle: string; title: string; image: string | null }[] = [];
+    let collections: { id: number; handle: string; title: string; image: string | null; productsCount: number }[] = [];
     if (needCollections) { try { collections = await listCollectionsLite(shop, token); } catch { collections = []; } }
     const cMap = new Map(collections.map((c) => [c.handle, c]));
 
@@ -117,16 +117,18 @@ export async function POST(req: NextRequest, { params }: { params: { siteId: str
     // Sidebar resolue
     const bestHandles =
       sb.bestsellers?.auto || !(sb.bestsellers?.manual_handles || []).filter(Boolean).length
-        ? products.slice(0, 3).map((p) => p.handle)
+        ? products.slice(0, 4).map((p) => p.handle)
         : sb.bestsellers.manual_handles;
     const bestItems: MiniProduct[] = (bestHandles || [])
       .map((h: string) => pMap.get(h))
       .filter(Boolean)
-      .slice(0, 3)
+      .slice(0, 4)
       .map((p: CroProduct) => ({ title: p.title, url: `/products/${p.handle}`, image: p.image, price: p.price, compareAt: p.compareAt }));
 
-    const catHandles = (sb.top_categories?.manual_handles || []).filter(Boolean).length ? sb.top_categories.manual_handles : collections.slice(0, 3).map((c) => c.handle);
-    const catItems: MiniLink[] = (catHandles || []).map((h: string) => cMap.get(h)).filter(Boolean).slice(0, 3).map((c: any) => ({ title: c.title, url: `/collections/${c.handle}`, image: c.image }));
+    const catHandles = (sb.top_categories?.manual_handles || []).filter(Boolean).length
+      ? sb.top_categories.manual_handles
+      : [...collections].sort((a, b) => (b.productsCount || 0) - (a.productsCount || 0)).slice(0, 5).map((c) => c.handle);
+    const catItems: MiniLink[] = (catHandles || []).map((h: string) => cMap.get(h)).filter(Boolean).slice(0, 5).map((c: any) => ({ title: c.title, url: `/collections/${c.handle}`, image: c.image, count: c.productsCount }));
 
     const artHandles = (sb.top_articles?.manual_handles || []).filter(Boolean).length ? sb.top_articles.manual_handles : articles.slice(0, 3).map((a) => a.handle);
     const artItems: MiniLink[] = (artHandles || []).map((h: string) => aMap.get(h)).filter(Boolean).slice(0, 3).map((a: any) => ({ title: a.title, url: `/blogs/${blogHandle}/${a.handle}`, image: a.image }));

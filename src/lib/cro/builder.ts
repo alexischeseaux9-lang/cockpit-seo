@@ -47,7 +47,7 @@ export type InlineItem = {
   compareAt?: string | null;
 };
 export type MiniProduct = { title: string; url: string; image: string | null; price?: string | null; compareAt?: string | null };
-export type MiniLink = { title: string; url: string; image?: string | null };
+export type MiniLink = { title: string; url: string; image?: string | null; count?: number };
 export type SidebarResolved = {
   lead_magnet?: SidebarConfig["lead_magnet"] | null;
   bestsellers?: { enabled: boolean; title: string; items: MiniProduct[] } | null;
@@ -99,6 +99,15 @@ function sizedImg(src: string | null, w = 440): string {
 
 const STARS = "★★★★★";
 
+// Icones inline (stroke = currentColor) pour les en-tetes de la sidebar.
+const SB_ICONS = {
+  gift: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="8" width="18" height="4" rx="1"/><path d="M12 8v13M5 12v9h14v-9"/><path d="M12 8S10 3 7.5 3a2.5 2.5 0 0 0 0 5H12zM12 8s2-5 4.5-5a2.5 2.5 0 0 1 0 5H12z"/></svg>',
+  award: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="9" r="6"/><path d="M9 14l-1.5 7L12 18l4.5 3L15 14"/></svg>',
+  grid: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="3" width="7" height="7" rx="1.5"/><rect x="3" y="14" width="7" height="7" rx="1.5"/><rect x="14" y="14" width="7" height="7" rx="1.5"/></svg>',
+  user: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="8" r="4"/><path d="M4 21c0-4 4-6 8-6s8 2 8 6"/></svg>',
+  check: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6L9 17l-5-5"/></svg>',
+};
+
 // ---- CSS (scope .yv-cro*, couleurs interpolees depuis la palette) ----
 function styleBlock(br: Branding): string {
   return `<style>
@@ -119,22 +128,31 @@ function styleBlock(br: Branding): string {
 .yv-aside{max-width:320px;float:right;margin:8px 0 22px 28px;font-family:inherit}
 @media(max-width:849px){.yv-aside{float:none;margin:24px auto;max-width:480px}}
 .yv-box{border:1px solid ${br.border};border-radius:14px;background:${br.cardBg};padding:16px;margin-bottom:16px}
-.yv-box h4{font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.06em;color:${br.accent};margin:0 0 10px}
-.yv-mini{display:flex;gap:10px;align-items:center;padding:7px 0;text-decoration:none;border-top:1px solid ${br.border}}
+.yv-box h4{display:flex;align-items:center;gap:8px;font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.06em;color:${br.accent};margin:0 0 12px}
+.yv-box h4 svg{width:16px;height:16px;flex:0 0 auto}
+.yv-mini{display:flex;gap:10px;align-items:center;padding:8px 0;text-decoration:none;border-top:1px solid ${br.border}}
 .yv-mini:first-of-type{border-top:0}
 .yv-mini img{width:46px;height:46px;object-fit:cover;border-radius:8px;flex:0 0 46px}
-.yv-mini .m-t{font-size:13px;color:${br.textDark};line-height:1.25;font-weight:500}
+.yv-mini .m-t{font-size:13px;color:${br.textDark};line-height:1.25;font-weight:500;flex:1;min-width:0}
 .yv-mini .m-p{font-size:12px;font-weight:700;color:${br.accent}}
-.yv-lead p{margin:0 0 8px;font-size:13px;color:${br.textMuted}}
-.yv-lead .perk{font-size:13px;color:${br.textDark};padding:2px 0}
-.yv-lead .promo{margin:8px 0;font-weight:700;color:${br.accentDark};letter-spacing:.04em}
-.yv-lead .yv-cta{display:inline-block;background:${br.accent};color:#fff;padding:9px 16px;border-radius:9px;text-decoration:none;font-size:13px;font-weight:600;margin-top:4px}
-.yv-auth .row{display:flex;align-items:center;gap:10px}
-.yv-auth img{width:48px;height:48px;border-radius:50%;object-fit:cover}
+.yv-mini .m-ct{font-size:12px;color:${br.textMuted};white-space:nowrap}
+.yv-seeall{display:inline-block;margin-top:10px;font-size:12px;font-weight:600;color:${br.accent};text-decoration:none}
+.yv-lead p{margin:0 0 10px;font-size:13px;color:${br.textMuted}}
+.yv-lead .perk{display:flex;align-items:center;gap:8px;font-size:13px;color:${br.textDark};padding:3px 0}
+.yv-lead .perk svg{width:16px;height:16px;color:${br.accent};flex:0 0 auto}
+.yv-lead .promo{margin:10px 0;font-weight:700;color:${br.accentDark};letter-spacing:.04em}
+.yv-form{margin-top:12px}
+.yv-form input[type=email]{width:100%;box-sizing:border-box;border:1px solid ${br.border};border-radius:9px;padding:10px 12px;font-size:13px;margin-bottom:8px;background:#fff;color:${br.textDark}}
+.yv-fbtn{display:block;width:100%;box-sizing:border-box;background:${br.accent};color:#fff;border:0;padding:10px 16px;border-radius:9px;font-size:13px;font-weight:700;cursor:pointer;text-align:center}
+.yv-fbtn:hover{background:${br.accentDark}}
+.yv-auth .row{display:flex;align-items:center;gap:12px}
+.yv-auth .av{width:48px;height:48px;border-radius:50%;object-fit:cover;flex:0 0 48px}
+.yv-auth .avi{width:48px;height:48px;border-radius:50%;flex:0 0 48px;display:flex;align-items:center;justify-content:center;background:${br.accent};color:#fff;font-weight:700;font-size:16px}
 .yv-auth .nm{font-weight:700;color:${br.textDark};font-size:14px}
 .yv-auth .rl{font-size:12px;color:${br.textMuted}}
-.yv-auth .bio{font-size:13px;color:${br.textMuted};margin:8px 0 0}
-.yv-auth .badge{font-size:12px;color:${br.textDark};padding:2px 0}
+.yv-auth .bio{font-size:13px;color:${br.textMuted};margin:10px 0 0;line-height:1.55}
+.yv-auth .badge{display:flex;align-items:center;gap:8px;font-size:12px;color:${br.textDark};padding:3px 0}
+.yv-auth .badge svg{width:14px;height:14px;color:${br.accent};flex:0 0 auto}
 </style>`;
 }
 
@@ -159,38 +177,35 @@ function inlineCardHtml(it: InlineItem, sym: string): string {
 
 function miniProduct(p: MiniProduct, sym: string): string {
   const img = sizedImg(p.image, 120);
-  return `<a class="yv-mini" href="${esc(p.url)}">${img ? `<img src="${esc(img)}" alt="${esc(p.title)}" loading="lazy">` : ""}<span><span class="m-t">${esc(p.title)}</span>${p.price ? `<br><span class="m-p">${esc(money(p.price, sym))}</span>` : ""}</span></a>`;
+  return `<a class="yv-mini" href="${esc(p.url)}">${img ? `<img src="${esc(img)}" alt="${esc(p.title)}" loading="lazy">` : ""}<span class="m-t">${esc(p.title)}${p.price ? `<br><span class="m-p">${esc(money(p.price, sym))}</span>` : ""}</span></a>`;
 }
 function miniLink(l: MiniLink): string {
   const img = sizedImg(l.image || null, 120);
-  return `<a class="yv-mini" href="${esc(l.url)}">${img ? `<img src="${esc(img)}" alt="${esc(l.title)}" loading="lazy">` : ""}<span class="m-t">${esc(l.title)}</span></a>`;
+  const count = typeof l.count === "number" && l.count > 0 ? `<span class="m-ct">${l.count} products</span>` : "";
+  return `<a class="yv-mini" href="${esc(l.url)}">${img ? `<img src="${esc(img)}" alt="${esc(l.title)}" loading="lazy">` : ""}<span class="m-t">${esc(l.title)}</span>${count}</a>`;
 }
 
 function asideHtml(sb: SidebarResolved, sym: string): string {
   const boxes: string[] = [];
   const lm = sb.lead_magnet;
   if (lm?.enabled) {
-    boxes.push(`<div class="yv-box yv-lead"><h4>${esc(lm.title || "Cadeau de bienvenue")}</h4>
-      ${lm.subtitle ? `<p>${esc(lm.subtitle)}</p>` : ""}
-      ${(lm.perks || []).filter(Boolean).map((p) => `<div class="perk">${esc(p)}</div>`).join("")}
-      ${lm.promo_code ? `<div class="promo">${esc(lm.promo_code)}</div>` : ""}
-      <a class="yv-cta" href="${esc(lm.cta_url || "#")}">${esc(lm.cta_text || "S'inscrire")}</a></div>`);
+    const form = `<form method="post" action="/contact#yv-nl" accept-charset="UTF-8" class="yv-form"><input type="hidden" name="form_type" value="customer"><input type="hidden" name="utf8" value="&#10003;"><input type="hidden" name="contact[tags]" value="newsletter, blog"><input type="email" name="contact[email]" placeholder="Your email address" required><button type="submit" class="yv-fbtn">${esc(lm.cta_text || "S'inscrire")} →</button></form>`;
+    boxes.push(`<div class="yv-box yv-lead"><h4>${SB_ICONS.gift} ${esc(lm.title || "Welcome gift")}</h4>${lm.subtitle ? `<p>${esc(lm.subtitle)}</p>` : ""}${(lm.perks || []).filter(Boolean).map((p) => `<div class="perk">${SB_ICONS.check} ${esc(p)}</div>`).join("")}${lm.promo_code ? `<div class="promo">${esc(lm.promo_code)}</div>` : ""}${form}</div>`);
   }
   if (sb.bestsellers?.enabled && sb.bestsellers.items.length) {
-    boxes.push(`<div class="yv-box"><h4>${esc(sb.bestsellers.title || "Best-sellers")}</h4>${sb.bestsellers.items.slice(0, 3).map((p) => miniProduct(p, sym)).join("")}</div>`);
+    boxes.push(`<div class="yv-box"><h4>${SB_ICONS.award} ${esc(sb.bestsellers.title || "Best sellers")}</h4>${sb.bestsellers.items.slice(0, 4).map((p) => miniProduct(p, sym)).join("")}<a class="yv-seeall" href="/collections/all">See all best sellers →</a></div>`);
   }
   if (sb.categories?.enabled && sb.categories.items.length) {
-    boxes.push(`<div class="yv-box"><h4>${esc(sb.categories.title || "Nos univers")}</h4>${sb.categories.items.slice(0, 3).map(miniLink).join("")}</div>`);
+    boxes.push(`<div class="yv-box"><h4>${SB_ICONS.grid} ${esc(sb.categories.title || "Our collections")}</h4>${sb.categories.items.slice(0, 5).map(miniLink).join("")}</div>`);
   }
   if (sb.articles?.enabled && sb.articles.items.length) {
-    boxes.push(`<div class="yv-box"><h4>${esc(sb.articles.title || "A lire aussi")}</h4>${sb.articles.items.slice(0, 3).map(miniLink).join("")}</div>`);
+    boxes.push(`<div class="yv-box"><h4>${SB_ICONS.grid} ${esc(sb.articles.title || "Read more")}</h4>${sb.articles.items.slice(0, 3).map(miniLink).join("")}</div>`);
   }
   const au = sb.author;
   if (au?.enabled && (au.name || au.bio)) {
-    boxes.push(`<div class="yv-box yv-auth">
-      <div class="row">${au.image_url ? `<img src="${esc(au.image_url)}" alt="${esc(au.name)}">` : ""}<span><span class="nm">${esc(au.name)}</span><br><span class="rl">${esc(au.role)}</span></span></div>
-      ${au.bio ? `<p class="bio">${esc(au.bio)}</p>` : ""}
-      ${(au.trust_badges || []).filter(Boolean).map((b) => `<div class="badge">${esc(b)}</div>`).join("")}</div>`);
+    const initials = (au.name || "").split(/\s+/).filter(Boolean).slice(0, 2).map((w) => (w[0] || "").toUpperCase()).join("") || "A";
+    const avatar = au.image_url ? `<img class="av" src="${esc(au.image_url)}" alt="${esc(au.name)}">` : `<span class="avi">${esc(initials)}</span>`;
+    boxes.push(`<div class="yv-box yv-auth"><h4>${SB_ICONS.user} The author</h4><div class="row">${avatar}<span><span class="nm">${esc(au.name)}</span><br><span class="rl">${esc(au.role)}</span></span></div>${au.bio ? `<p class="bio">${esc(au.bio)}</p>` : ""}${(au.trust_badges || []).filter(Boolean).map((bg) => `<div class="badge">${SB_ICONS.check} ${esc(bg)}</div>`).join("")}</div>`);
   }
   if (!boxes.length) return "";
   return `<aside class="yv-aside" data-cro-injected="1">${boxes.join("")}</aside>`;

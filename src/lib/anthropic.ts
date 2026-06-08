@@ -83,14 +83,34 @@ Produis un brief d'article qui battra ces concurrents. Reponds UNIQUEMENT en JSO
 
 export type WrittenArticle = { body_html: string; excerpt: string };
 
+type ArticleBranding = { accent: string; accentDark: string; cardBg: string; textDark: string; textMuted: string; border: string };
+const DEFAULT_ARTICLE_BRANDING: ArticleBranding = { accent: "#10b981", accentDark: "#0b7a5a", cardBg: "#f6f7f6", textDark: "#18181b", textMuted: "#6b7280", border: "#e5e7eb" };
+
+function svgIcon(path: string): string {
+  return `<svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" style="flex:0 0 auto">${path}</svg>`;
+}
+const ICON_LIB: Record<string, string> = {
+  star: svgIcon('<path d="M12 3l2.6 5.3 5.9.9-4.3 4.1 1 5.8L12 16.9 6.8 19.2l1-5.8L3.5 9.2l5.9-.9z"/>'),
+  bulb: svgIcon('<path d="M9 18h6"/><path d="M10 21h4"/><path d="M12 3a6 6 0 0 0-4 10c.7.7 1 1.6 1 2.5h6c0-.9.3-1.8 1-2.5a6 6 0 0 0-4-10z"/>'),
+  check: svgIcon('<path d="M20 6L9 17l-5-5"/>'),
+  droplet: svgIcon('<path d="M12 2.7s6 5.5 6 9.8a6 6 0 0 1-12 0c0-4.3 6-9.8 6-9.8z"/>'),
+  shield: svgIcon('<path d="M12 3l8 3v6c0 4-3.5 7-8 9-4.5-2-8-5-8-9V6z"/>'),
+  clock: svgIcon('<circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/>'),
+  leaf: svgIcon('<path d="M11 3C6 3 3 7 3 12c0 3 2 6 5 7 0-5 3-9 9-11-2-3-4-5-6-5z"/><path d="M8 19c4-6 8-8 11-9"/>'),
+  thermometer: svgIcon('<path d="M14 14V5a2 2 0 0 0-4 0v9a4 4 0 1 0 4 0z"/>'),
+  feather: svgIcon('<path d="M20 4C12 4 8 9 8 16v3h3c7 0 12-4 12-12"/><path d="M8 19l-4 1 1-4"/>'),
+};
+
 export async function writeArticle(
   brief: ArticleBrief,
   keyword: string,
-  voiceProfile: Record<string, any>
+  voiceProfile: Record<string, any>,
+  branding?: Partial<ArticleBranding>
 ): Promise<WrittenArticle> {
   const c = client();
   const lang = voiceProfile.content_language || "francais";
   const persona = voiceProfile.mascot || voiceProfile.author_name;
+  const b: ArticleBranding = { ...DEFAULT_ARTICLE_BRANDING, ...(branding || {}) };
   const extraBans = [
     ...expandAntiAiPatterns(voiceProfile.anti_ai_patterns),
     voiceProfile.anti_ai_custom,
@@ -98,30 +118,67 @@ export async function writeArticle(
   const sys = `Tu es un redacteur SEO expert${persona ? ` qui ecrit sous la plume de ${persona}` : ""}. Tu ecris en ${lang}. ${STYLE_RULES}${
     extraBans ? `\nFormules supplementaires a bannir absolument: ${extraBans}.` : ""
   }${voiceProfile.bonus_instructions ? `\nInstructions specifiques: ${voiceProfile.bonus_instructions}` : ""}`;
-  const prompt = `Redige un article de blog complet et optimise SEO.
+
+  // Composants de marque a reutiliser VERBATIM (couleurs deja injectees).
+  const tplKeyPoints = `<div style="background:${b.cardBg};border-left:4px solid ${b.accent};padding:18px 22px;border-radius:10px;margin:26px 0;"><p style="margin:0 0 10px;display:flex;align-items:center;gap:8px;font-weight:700;color:${b.accentDark};font-size:15px;"><span style="color:${b.accent}">${ICON_LIB.star}</span> Key points at a glance</p><ul style="margin:0;padding-left:20px;color:${b.textDark};line-height:1.7;"><li>POINT</li></ul></div>`;
+  const tplEssRow = `<div style="display:flex;align-items:center;gap:14px;background:#ffffff;border:1px solid ${b.border};border-radius:12px;padding:14px 18px;"><span style="color:${b.accent}">${ICON_LIB.check}</span><span style="color:${b.textDark};font-weight:500;font-size:15px;">BENEFIT</span></div>`;
+  const tplEssentials = `<div style="background:${b.cardBg};border:1px solid ${b.border};border-radius:16px;padding:14px;margin:30px 0;"><p style="text-align:center;font-weight:700;color:${b.accentDark};font-size:18px;margin:8px 0 14px;">TITLE</p><div style="display:flex;flex-direction:column;gap:8px;">${tplEssRow}</div></div>`;
+  const tplDidYouKnow = `<div style="background:#eff6ff;border-left:4px solid #3b82f6;padding:18px 22px;border-radius:10px;margin:26px 0;"><p style="margin:0 0 8px;display:flex;align-items:center;gap:8px;font-weight:700;color:#1e40af;font-size:15px;"><span style="color:#3b82f6">${ICON_LIB.bulb}</span> Did you know?</p><p style="margin:0;color:#1e3a8a;line-height:1.6;">FACT</p></div>`;
+  const tplFigure = `<figure style="margin:30px 0;"><img data-gen="DESCRIPTION_IMAGE_ANGLAIS_SANS_TEXTE" alt="ALT" style="width:100%;height:auto;border-radius:14px;display:block;background:#f1efe9;"><figcaption style="text-align:center;color:${b.textMuted};font-size:13px;margin-top:10px;font-style:italic;line-height:1.4;">LEGENDE</figcaption></figure>`;
+  const iconNames = Object.keys(ICON_LIB).filter((k) => k !== "star" && k !== "bulb").join(", ");
+
+  const prompt = `Redige un article de blog premium, immersif et optimise SEO. Objectif: que le lecteur ait du plaisir a lire (rythme, visuels, encadres), pas juste un mur de texte.
 
 Titre: ${brief.title}
 Mot-cle principal: ${keyword}
 Mots-cles secondaires: ${brief.secondary_keywords.join(", ")}
-Plan a suivre (H2): ${brief.outline.join(" | ")}
+Plan indicatif (H2): ${brief.outline.join(" | ")}
 Longueur cible: ~${brief.target_words} mots.
 Ton: ${voiceProfile.tone_description || "expert, accessible, concret"}${voiceProfile.example_phrases ? `\nExemples de phrases dans le ton: ${voiceProfile.example_phrases}` : ""}
 
-Contraintes:
-- Sors du HTML propre: <h2>, <h3>, <p>, <ul><li>, <strong>. Pas de <h1> (le titre est gere a part).
-- Introduction qui accroche des la premiere phrase, sans formule cliche.
-- Chaque section apporte une info concrete et actionnable.
-- Termine par une section pratique (pas "en conclusion").
+REGLES DE STRUCTURE (a respecter dans l'ordre):
+1. Pas de <h1>, pas de table des matieres, pas de date (geres a part).
+2. Ouverture: 2 paragraphes courts qui accrochent des la 1ere phrase (pas de cliche).
+3. Juste apres, UN encadre "Key points at a glance" (4 a 6 puces resumant l'article).
+4. Ensuite UN encadre "essentials" (titre + 3 a 5 lignes a icone) qui met en avant les benefices/points cles pour le lecteur.
+5. Puis le corps: alterne <h2> + 2 a 3 paragraphes AERES (2 a 4 phrases chacun), <h3> et <ul><li> quand utile.
+6. Insere 3 a 4 visuels <figure> a des moments naturels (pas deux a la suite), chacun avec une description d'image precise et une legende.
+7. Insere 1 a 2 encadres "Did you know?" avec un fait reellement interessant et verifiable.
+8. Termine par une section pratique et actionnable (jamais "en conclusion").
+9. Paragraphes courts, scannables. <strong> sur les idees cles.
+
+COMPOSANTS A REUTILISER EXACTEMENT (copie le HTML tel quel, ne change QUE le texte; garde les couleurs et le style inline):
+
+[KEY POINTS] (une seule fois, repete <li>POINT</li> pour chaque puce):
+${tplKeyPoints}
+
+[ESSENTIALS] (une seule fois; repete le bloc de ligne pour chaque benefice; remplace TITLE et BENEFIT; tu peux changer l'icone par une de cette liste: ${iconNames}):
+${tplEssentials}
+Bibliotheque d'icones (colle l'une d'elles a la place du svg "check" selon le sens):
+- droplet (humidite): ${ICON_LIB.droplet}
+- shield (protection/durabilite): ${ICON_LIB.shield}
+- clock (longevite): ${ICON_LIB.clock}
+- leaf (matiere naturelle): ${ICON_LIB.leaf}
+- thermometer (temperature): ${ICON_LIB.thermometer}
+- feather (confort/legerete): ${ICON_LIB.feather}
+- check (general): ${ICON_LIB.check}
+
+[FIGURE] (3 a 4 fois; data-gen = description visuelle en anglais, concrete, sans aucun texte dans l'image; legende courte et utile):
+${tplFigure}
+
+[DID YOU KNOW] (1 a 2 fois):
+${tplDidYouKnow}
 
 Reponds UNIQUEMENT en JSON:
-{ "body_html": "<le HTML complet de l'article>", "excerpt": "resume de 2 phrases < 200 caracteres" }`;
+{ "body_html": "<le HTML complet de l'article avec les encadres, figures et callouts>", "excerpt": "resume de 2 phrases < 200 caracteres" }`;
+
   const msg = await c.messages.create({
     model: SONNET,
-    max_tokens: 8000,
+    max_tokens: 16000,
     system: sys,
     messages: [{ role: "user", content: prompt }],
   });
-  const text = msg.content.map((b) => (b.type === "text" ? b.text : "")).join("");
+  const text = msg.content.map((bk) => (bk.type === "text" ? bk.text : "")).join("");
   await logAnthropicUsage({ model: SONNET, usage: (msg as any).usage, context: "writer" });
   const out = extractJson(text) as WrittenArticle;
   out.body_html = stripEmDashes(out.body_html);

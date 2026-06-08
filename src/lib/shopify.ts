@@ -236,6 +236,7 @@ export type ShopifyCollection = {
   body_html: string;
   kind: "custom" | "smart";
   image_url: string | null;
+  products_count: number;
 };
 
 export async function listCollections(shop: string, token: string): Promise<ShopifyCollection[]> {
@@ -246,11 +247,11 @@ export async function listCollections(shop: string, token: string): Promise<Shop
   const out: ShopifyCollection[] = [];
   if (custom.ok) {
     const d = await custom.json();
-    for (const c of d.custom_collections || []) out.push({ id: c.id, title: c.title, handle: c.handle, body_html: c.body_html || "", kind: "custom", image_url: c.image?.src || null });
+    for (const c of d.custom_collections || []) out.push({ id: c.id, title: c.title, handle: c.handle, body_html: c.body_html || "", kind: "custom", image_url: c.image?.src || null, products_count: c.products_count || 0 });
   }
   if (smart.ok) {
     const d = await smart.json();
-    for (const c of d.smart_collections || []) out.push({ id: c.id, title: c.title, handle: c.handle, body_html: c.body_html || "", kind: "smart", image_url: c.image?.src || null });
+    for (const c of d.smart_collections || []) out.push({ id: c.id, title: c.title, handle: c.handle, body_html: c.body_html || "", kind: "smart", image_url: c.image?.src || null, products_count: c.products_count || 0 });
   }
   return out;
 }
@@ -371,7 +372,7 @@ export async function putThemeAsset(shop: string, token: string, themeId: string
 
 export async function listCollectionsLite(shop: string, token: string): Promise<{ id: number; handle: string; title: string; image: string | null; productsCount: number }[]> {
   const cols = await listCollections(shop, token);
-  return cols.map((c) => ({ id: c.id, handle: c.handle, title: c.title, image: c.image_url ?? null, productsCount: 0 }));
+  return cols.map((c) => ({ id: c.id, handle: c.handle, title: c.title, image: c.image_url ?? null, productsCount: c.products_count || 0 }));
 }
 
 // Image de secours pour une collection sans image : le 1er produit de la collection.
