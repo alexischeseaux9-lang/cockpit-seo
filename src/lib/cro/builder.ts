@@ -1,7 +1,9 @@
 // Builder des blocs CRO injectes dans le theme Shopify (sections/main-article.liquid).
-// Approche : un <style> + <script> places entre markers. Le script trouve le conteneur
-// de l'article et insere les cartes produit AUX POSITIONS configurees (dans le contenu,
-// pas a la fin), avec image + prix reels bakes au moment du push (style Yavok/buddhive).
+// Approche : un <style> + <script> places entre markers. Le script reconstruit la mise
+// en page de l'article (style Yavok/buddhive) : breadcrumb propre, meta date + temps de
+// lecture, layout 2 colonnes (contenu + sidebar qui defile), cartes produit aux positions
+// configurees, et une section de recommandations en fin d'article. Donnees (images, prix)
+// bakees au moment du push.
 
 export const SCRO_START_MARKER = "<!-- YAVOK_SCRO_START -->";
 export const SCRO_END_MARKER = "<!-- YAVOK_SCRO_END -->";
@@ -56,6 +58,17 @@ export type SidebarResolved = {
   author?: SidebarConfig["author"] | null;
 };
 
+// Recommandations en fin d'article (articles + produits + collections du site).
+export type RecoItem = {
+  kind: "product" | "article" | "collection";
+  title: string;
+  url: string;
+  image: string | null;
+  price?: string | null;
+  compareAt?: string | null;
+};
+export type RecoResolved = { enabled: boolean; title: string; items: RecoItem[] } | null;
+
 // Palette de marque. Pilotee par voice_profile.branding (objet complet, editable
 // dans l'onglet SCRO). Fallback sur branding_accent_hex puis sur des valeurs neutres.
 export function defaultBranding(voice: Record<string, any>): Branding {
@@ -99,16 +112,20 @@ function sizedImg(src: string | null, w = 440): string {
 
 const STARS = "★★★★★";
 
-// Icones inline (stroke = currentColor) pour les en-tetes de la sidebar.
+// Icones inline (stroke = currentColor) pour les en-tetes de la sidebar et la meta.
 const SB_ICONS = {
   gift: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="8" width="18" height="4" rx="1"/><path d="M12 8v13M5 12v9h14v-9"/><path d="M12 8S10 3 7.5 3a2.5 2.5 0 0 0 0 5H12zM12 8s2-5 4.5-5a2.5 2.5 0 0 1 0 5H12z"/></svg>',
   award: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="9" r="6"/><path d="M9 14l-1.5 7L12 18l4.5 3L15 14"/></svg>',
   grid: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="7" rx="1.5"/><rect x="14" y="3" width="7" height="7" rx="1.5"/><rect x="3" y="14" width="7" height="7" rx="1.5"/><rect x="14" y="14" width="7" height="7" rx="1.5"/></svg>',
   user: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="8" r="4"/><path d="M4 21c0-4 4-6 8-6s8 2 8 6"/></svg>',
   check: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6L9 17l-5-5"/></svg>',
+  book: '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"/></svg>',
 };
+// Icones meta (date + temps de lecture), injectees brutes dans le script.
+const ICON_CAL = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="18" rx="2"/><path d="M16 2v4M8 2v4M3 10h18"/></svg>';
+const ICON_CLK = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg>';
 
-// ---- CSS (scope .yv-cro*, couleurs interpolees depuis la palette) ----
+// ---- CSS (scope .yv-*, couleurs interpolees depuis la palette) ----
 function styleBlock(br: Branding): string {
   return `<style>
 .yv-card{display:flex;gap:18px;align-items:center;border:1px solid ${br.border};border-radius:16px;background:${br.cardBg};padding:18px;max-width:680px;margin:30px auto;box-shadow:0 2px 8px rgba(0,0,0,.06);font-family:inherit}
@@ -126,12 +143,20 @@ function styleBlock(br: Branding): string {
 .yv-card .yv-cta{display:inline-block;background:${br.accent};color:#fff;padding:9px 18px;border-radius:9px;text-decoration:none;font-size:14px;font-weight:600}
 .yv-card .yv-cta:hover{background:${br.accentDark}}
 .blog-contents{display:none!important}
-.yv-layout{display:flex;gap:36px;align-items:flex-start;max-width:1120px;margin:0 auto;width:100%;box-sizing:border-box}
+/* Layout 2 colonnes : englobe tout l'article (image + titre + contenu) a gauche, sidebar a droite. */
+.yv-layout{display:flex;gap:40px;align-items:flex-start;max-width:1160px;margin:0 auto;width:100%;padding:0 24px;box-sizing:border-box}
 .yv-layout > .yv-content{flex:1 1 auto;min-width:0;max-width:760px}
-.yv-content img{max-width:100%;height:auto}
-.yv-aside{flex:0 0 320px;width:320px;align-self:flex-start;position:sticky;top:24px;margin:0;font-family:inherit}
+.yv-content .page-width{max-width:none!important;padding-left:0!important;padding-right:0!important;margin-left:0!important;margin-right:0!important;width:100%!important}
+.yv-content .article-block-padding{padding-left:0!important;padding-right:0!important}
+.yv-content .article-header__container{display:block!important}
+.yv-content .article-template__title{text-align:left;max-width:100%;margin-top:0}
+.yv-content .article-template__excerpt{text-align:left}
+.yv-content .article-template__hero-adapt{border-radius:16px;overflow:hidden}
+.yv-content .article-template__content-container{border-top:1px solid ${br.border};padding-top:26px!important;margin-top:4px}
+.article-template__content img{max-width:100%;height:auto}
+/* La sidebar defile avec l'article (pas de sticky). */
+.yv-aside{flex:0 0 320px;width:320px;align-self:flex-start;margin:0;font-family:inherit}
 .yv-lead-img{width:100%;height:160px;object-fit:cover;border-radius:10px;display:block;margin-bottom:14px}
-@media(max-width:900px){.yv-layout{display:block;max-width:760px}.yv-aside{width:auto;position:static;margin:28px auto 0}}
 .yv-box{border:1px solid ${br.border};border-radius:14px;background:${br.cardBg};padding:16px;margin-bottom:16px}
 .yv-box h4{display:flex;align-items:center;gap:8px;font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.06em;color:${br.accent};margin:0 0 12px}
 .yv-box h4 svg{width:16px;height:16px;flex:0 0 auto}
@@ -158,6 +183,30 @@ function styleBlock(br: Branding): string {
 .yv-auth .bio{font-size:13px;color:${br.textMuted};margin:10px 0 0;line-height:1.55}
 .yv-auth .badge{display:flex;align-items:center;gap:8px;font-size:12px;color:${br.textDark};padding:3px 0}
 .yv-auth .badge svg{width:14px;height:14px;color:${br.accent};flex:0 0 auto}
+/* Breadcrumb refait : aligne a gauche, discret, format Home / Blog / Titre. */
+.yv-breadcrumb{max-width:1160px;margin:0 auto;padding:0 24px;display:flex;flex-wrap:wrap;gap:9px;align-items:center;font-size:13px;line-height:1.5;color:${br.textMuted};box-sizing:border-box;text-align:left}
+.yv-breadcrumb a{color:${br.textMuted};text-decoration:none}
+.yv-breadcrumb a:hover{color:${br.accent}}
+.yv-breadcrumb .yv-bcs{color:${br.border}}
+.yv-breadcrumb .yv-bcc{color:${br.textDark};font-weight:500}
+/* Meta sous le titre : date + temps de lecture, avec icones. */
+.yv-meta{display:flex;flex-wrap:wrap;gap:20px;align-items:center;margin:16px 0 2px;color:${br.textMuted};font-size:13px}
+.yv-meta .yv-mi{display:inline-flex;align-items:center;gap:7px}
+.yv-meta svg{width:15px;height:15px;color:${br.accent};flex:0 0 auto}
+/* Recommandations en fin d'article. */
+.yv-reco{max-width:1160px;margin:48px auto 8px;padding:0 24px;box-sizing:border-box}
+.yv-reco h3{font-size:21px;font-weight:700;color:${br.textDark};margin:0 0 18px}
+.yv-reco-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:22px}
+.yv-rc{display:flex;flex-direction:column;text-decoration:none;border:1px solid ${br.border};border-radius:16px;overflow:hidden;background:${br.cardBg};transition:box-shadow .15s,transform .15s}
+.yv-rc:hover{box-shadow:0 8px 24px rgba(0,0,0,.09);transform:translateY(-2px)}
+.yv-rc-img{aspect-ratio:4/3;background:#f2f1ee;overflow:hidden}
+.yv-rc-img img{width:100%;height:100%;object-fit:cover;display:block}
+.yv-rc-bd{padding:14px 15px 16px}
+.yv-rc-lbl{font-size:10px;font-weight:700;letter-spacing:.07em;text-transform:uppercase;color:${br.accent};margin-bottom:5px}
+.yv-rc-ttl{font-size:14px;font-weight:600;color:${br.textDark};line-height:1.35}
+.yv-rc-pr{margin-top:9px;font-size:14px;font-weight:700;color:${br.textDark}}
+.yv-rc-pr s{font-weight:400;color:${br.textMuted};font-size:12px;margin-left:6px}
+@media(max-width:900px){.yv-layout{display:block;max-width:760px;padding:0 20px}.yv-aside{width:auto;margin:30px auto 0}.yv-breadcrumb,.yv-reco{padding:0 20px}}
 </style>`;
 }
 
@@ -204,7 +253,7 @@ function asideHtml(sb: SidebarResolved, sym: string): string {
     boxes.push(`<div class="yv-box"><h4>${SB_ICONS.grid} ${esc(sb.categories.title || "Our collections")}</h4>${sb.categories.items.slice(0, 5).map(miniLink).join("")}</div>`);
   }
   if (sb.articles?.enabled && sb.articles.items.length) {
-    boxes.push(`<div class="yv-box"><h4>${SB_ICONS.grid} ${esc(sb.articles.title || "Read more")}</h4>${sb.articles.items.slice(0, 3).map(miniLink).join("")}</div>`);
+    boxes.push(`<div class="yv-box"><h4>${SB_ICONS.book} ${esc(sb.articles.title || "Read more")}</h4>${sb.articles.items.slice(0, 3).map(miniLink).join("")}</div>`);
   }
   const au = sb.author;
   if (au?.enabled && (au.name || au.bio)) {
@@ -216,6 +265,21 @@ function asideHtml(sb: SidebarResolved, sym: string): string {
   return `<aside class="yv-aside" data-cro-injected="1">${boxes.join("")}</aside>`;
 }
 
+function recoCard(it: RecoItem, sym: string): string {
+  const img = sizedImg(it.image, 480);
+  const label = it.kind === "article" ? "Article" : it.kind === "collection" ? "Collection" : "Product";
+  const pct = discountPct(it.price, it.compareAt);
+  const price =
+    it.kind === "product" && it.price
+      ? `<div class="yv-rc-pr">${esc(money(it.price, sym))}${it.compareAt && pct > 0 ? `<s>${esc(money(it.compareAt, sym))}</s>` : ""}</div>`
+      : "";
+  return `<a class="yv-rc" href="${esc(it.url)}">${img ? `<div class="yv-rc-img"><img src="${esc(img)}" alt="${esc(it.title)}" loading="lazy"></div>` : ""}<div class="yv-rc-bd"><div class="yv-rc-lbl">${esc(label)}</div><div class="yv-rc-ttl">${esc(it.title)}</div>${price}</div></a>`;
+}
+function recoHtml(reco: RecoResolved, sym: string): string {
+  if (!reco || !reco.enabled || !reco.items.length) return "";
+  return `<section class="yv-reco" data-cro-injected="1"><h3>${esc(reco.title || "You may also like")}</h3><div class="yv-reco-grid">${reco.items.map((it) => recoCard(it, sym)).join("")}</div></section>`;
+}
+
 export function buildScroLiquid(opts: {
   inlineEnabled: boolean;
   sidebarEnabled: boolean;
@@ -223,41 +287,91 @@ export function buildScroLiquid(opts: {
   sidebar: SidebarResolved;
   branding: Branding;
   currency: string;
+  reco?: RecoResolved;
 }): string {
   const sym = currencySymbol(opts.currency || "USD");
   const inlineHtml = opts.inlineEnabled ? opts.inline.filter((it) => it.title && it.url).map((it) => inlineCardHtml(it, sym)) : [];
   const pcts = opts.inlineEnabled ? opts.inline.filter((it) => it.title && it.url).map((it) => (it.position === "end" ? null : Number(it.position))) : [];
   const aside = opts.sidebarEnabled ? asideHtml(opts.sidebar, sym) : "";
-  if (!inlineHtml.length && !aside) return "";
+  const reco = recoHtml(opts.reco || null, sym);
+  if (!inlineHtml.length && !aside && !reco) return "";
 
   const script = `<script>
 (function(){
+  var CAL=${JSON.stringify(ICON_CAL)},CLK=${JSON.stringify(ICON_CLK)};
   function run(){
   if (document.querySelector('[data-yv-cro]')) return;
   var sels=['.article-template__content','.article-main','[itemprop="articleBody"]','.article__content','.post-content','.rte'];
-  var main=null,i;
-  for(i=0;i<sels.length;i++){var el=document.querySelector(sels[i]); if(el && el.querySelectorAll('p').length>=3){main=el;break;}}
-  if(!main){for(i=0;i<sels.length;i++){var e2=document.querySelector(sels[i]); if(e2){main=e2;break;}}}
-  if(!main) return;
-  main.setAttribute('data-yv-cro','1');
+  var content=null,i;
+  for(i=0;i<sels.length;i++){var el0=document.querySelector(sels[i]); if(el0 && el0.querySelectorAll('p').length>=3){content=el0;break;}}
+  if(!content){for(i=0;i<sels.length;i++){var e2=document.querySelector(sels[i]); if(e2){content=e2;break;}}}
+  if(!content) return;
+  content.setAttribute('data-yv-cro','1');
   var INLINE=${JSON.stringify(inlineHtml)};
   var PCTS=${JSON.stringify(pcts)};
   var ASIDE=${JSON.stringify(aside)};
+  var RECO=${JSON.stringify(reco)};
   function frag(html){return document.createRange().createContextualFragment(html);}
-  if(ASIDE){
-    var lay=document.createElement('div'); lay.className='yv-layout';
-    main.classList.add('yv-content');
-    if(main.parentNode){ main.parentNode.insertBefore(lay, main); lay.appendChild(main); lay.appendChild(frag(ASIDE)); }
-  }
-  var notInj=function(el){return !el.closest('[data-cro-injected]');};
-  var paras=Array.prototype.slice.call(main.querySelectorAll(':scope > p, :scope > h2, :scope > h3')).filter(notInj);
-  if(paras.length<3){ paras=Array.prototype.slice.call(main.querySelectorAll('p, h2, h3')).filter(notInj); }
+  function mkdiv(cls){var d=document.createElement('div'); d.className=cls; return d;}
+  function escTxt(s){return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');}
+
+  // Temps de lecture (mots / 200) et titre, calcules sur le contenu.
+  var words=(content.innerText||'').trim().split(/\\s+/).filter(Boolean).length;
+  var mins=Math.max(1,Math.round(words/200));
+  var titleEl=document.querySelector('.article-template__title');
+  var titleTxt=titleEl?titleEl.textContent.trim():'';
+
+  // Cartes produit inline aux positions configurees.
+  var notInj=function(e){return !e.closest('[data-cro-injected]');};
+  var paras=Array.prototype.slice.call(content.querySelectorAll(':scope > p, :scope > h2, :scope > h3')).filter(notInj);
+  if(paras.length<3){ paras=Array.prototype.slice.call(content.querySelectorAll('p, h2, h3')).filter(notInj); }
   if(paras.length>=2 && INLINE.length){
     for(var j=INLINE.length-1;j>=0;j--){
       var pct=PCTS[j];
       if(pct==null){ var lp=paras[paras.length-1]; if(lp&&lp.parentNode) lp.parentNode.insertBefore(frag(INLINE[j]), lp.nextSibling); }
       else { var idx=Math.max(1,Math.min(paras.length-1,Math.floor(paras.length*pct))); var t=paras[idx]; if(t&&t.parentNode) t.parentNode.insertBefore(frag(INLINE[j]), t); }
     }
+  }
+
+  // Meta : date (lue dans le theme) + temps de lecture, sous le titre.
+  var dateNode=document.querySelector('.article-header__date time')||document.querySelector('.article-header__date')||document.querySelector('time');
+  var dateTxt=dateNode?dateNode.textContent.trim():'';
+  var metaHtml='<div class="yv-meta">'
+    +(dateTxt?'<span class="yv-mi">'+CAL+'<span>'+escTxt(dateTxt)+'</span></span>':'')
+    +'<span class="yv-mi">'+CLK+'<span>'+mins+' min read</span></span>'
+    +'</div>';
+  var origDate=document.querySelector('.article-header__date-and-author');
+  if(origDate&&origDate.parentNode){ origDate.parentNode.insertBefore(frag(metaHtml), origDate); origDate.style.display='none'; }
+  else { var hc=document.querySelector('.article-header__content'); if(hc) hc.appendChild(frag(metaHtml)); }
+
+  // Breadcrumb refait : Home / Blog / Titre, aligne a gauche, discret.
+  var bc=document.querySelector('.article__category-nav');
+  if(bc){
+    var bl=bc.querySelector('a'); var bh=bl?bl.getAttribute('href'):'/blogs/news'; var bn=bl?bl.textContent.trim():'Blog';
+    bc.className='yv-breadcrumb'; bc.removeAttribute('style');
+    bc.innerHTML='<a href="/">Home</a><span class="yv-bcs">/</span><a href="'+bh+'">'+escTxt(bn)+'</a>'+(titleTxt?'<span class="yv-bcs">/</span><span class="yv-bcc">'+escTxt(titleTxt)+'</span>':'');
+  }
+
+  // Layout 2 colonnes : tout l'article a gauche (760px), sidebar a droite qui defile.
+  if(ASIDE){
+    var art=content.closest('.article-template')||content.closest('article')||content.parentNode;
+    art.setAttribute('data-yv-cro','1');
+    var col=mkdiv('yv-content');
+    while(art.firstChild){ col.appendChild(art.firstChild); }
+    // Sortir le breadcrumb au-dessus du layout (pleine largeur, aligne au layout).
+    var bcw=null; var bcIn=col.querySelector('.yv-breadcrumb'); if(bcIn){ bcw=bcIn.closest('.article-block-padding')||bcIn; if(bcw.parentNode) bcw.parentNode.removeChild(bcw); }
+    var lay=mkdiv('yv-layout'); lay.appendChild(col); lay.appendChild(frag(ASIDE));
+    if(bcw) art.appendChild(bcw);
+    art.appendChild(lay);
+    if(RECO) art.appendChild(frag(RECO));
+  } else if(RECO){
+    var p=content.parentNode; if(p) p.appendChild(frag(RECO));
+  }
+
+  // Ne pas recommander l'article courant (le bloc est partage par toutes les pages).
+  if(RECO){
+    var here=location.pathname.replace(/\\/+$/,'');
+    Array.prototype.slice.call(document.querySelectorAll('.yv-rc')).forEach(function(a){ var h=(a.getAttribute('href')||'').replace(/\\/+$/,''); if(h&&here&&h===here) a.style.display='none'; });
   }
   }
   if(document.readyState==='loading'){document.addEventListener('DOMContentLoaded',run);}else{run();}

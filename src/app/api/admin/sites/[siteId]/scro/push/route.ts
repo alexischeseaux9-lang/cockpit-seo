@@ -7,7 +7,7 @@ import {
   getDefaultBlogId, getDefaultBlogHandle, listArticles, getCollectionFirstProductImage,
   type CroProduct,
 } from "@/lib/shopify";
-import { buildScroLiquid, injectScro, defaultBranding, type InlineItem, type SidebarResolved, type MiniProduct, type MiniLink } from "@/lib/cro/builder";
+import { buildScroLiquid, injectScro, defaultBranding, type InlineItem, type SidebarResolved, type MiniProduct, type MiniLink, type RecoItem, type RecoResolved } from "@/lib/cro/builder";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -38,9 +38,12 @@ export async function POST(req: NextRequest, { params }: { params: { siteId: str
     const blocks: any[] = config.blocks || [];
     const sb: any = config.sidebar || {};
 
-    const needProducts = inlineEnabled || (sidebarEnabled && sb.bestsellers?.enabled);
-    const needCollections = (inlineEnabled && blocks.some((b) => b.kind === "collection")) || (sidebarEnabled && sb.top_categories?.enabled);
-    const needArticles = sidebarEnabled && sb.top_articles?.enabled;
+    // La section de recommandations en fin d'article est active des que le SCRO l'est.
+    // Elle a besoin de produits + articles + collections, donc on les charge dans ce cas.
+    const recoOn = inlineEnabled || sidebarEnabled;
+    const needProducts = inlineEnabled || (sidebarEnabled && sb.bestsellers?.enabled) || recoOn;
+    const needCollections = (inlineEnabled && blocks.some((b) => b.kind === "collection")) || (sidebarEnabled && sb.top_categories?.enabled) || recoOn;
+    const needArticles = (sidebarEnabled && sb.top_articles?.enabled) || recoOn;
 
     const currency = await getShopCurrency(shop, token);
     let products: CroProduct[] = [];
@@ -143,7 +146,22 @@ export async function POST(req: NextRequest, { params }: { params: { siteId: str
         : null,
     };
 
-    const liquid = buildScroLiquid({ inlineEnabled, sidebarEnabled, inline, sidebar, branding, currency });
+    // Recommandations fin d'article : melange articles + produits + collections du site.
+    const recoArticles: RecoItem[] = articles.slice(0, 4).map((a) => ({ kind: "article", title: a.title, url: `/blogs/${blogHandle}/${a.handle}`, image: a.image }));
+    const recoProducts: RecoItem[] = products.slice(0, 4).map((p) => ({ kind: "product", title: p.title, url: `/products/${p.handle}`, image: p.image, price: p.price, compareAt: p.compareAt }));
+    const recoCollections: RecoItem[] = collections
+      .filter((c) => c.handle !== "frontpage" && (c.title || "").trim().toLowerCase() !== "home page")
+      .slice(0, 4)
+      .map((c) => ({ kind: "collection", title: c.title, url: `/collections/${c.handle}`, image: c.image }));
+    const recoItems: RecoItem[] = [];
+    for (let i = 0; i < 4 && recoItems.length < 6; i++) {
+      if (recoArticles[i]) recoItems.push(recoArticles[i]);
+      if (recoProducts[i] && recoItems.length < 6) recoItems.push(recoProducts[i]);
+      if (recoCollections[i] && recoItems.length < 6) recoItems.push(recoCollections[i]);
+    }
+    const reco: RecoResolved = recoOn && recoItems.length ? { enabled: true, title: "You may also like", items: recoItems } : null;
+
+    const liquid = buildScroLiquid({ inlineEnabled, sidebarEnabled, inline, sidebar, branding, currency, reco });
 
     const current = (await getThemeAsset(shop, token, themeId, assetKey)) || "";
     const next = injectScro(current, liquid);
