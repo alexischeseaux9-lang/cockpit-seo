@@ -129,7 +129,7 @@ export async function runJob(jobId: string): Promise<{ ok: boolean; error?: stri
       const extraBans = expandAntiAiPatterns(voice.anti_ai_patterns);
       let body = await editArticle(written.body_html, extraBans);
       assertNoAntiPatterns(body, extraBans);
-      try { body = await fillArticleImages(body, voice.image_style_hint || "", 5); } catch { /* publie sans les images inline */ }
+      try { body = await fillArticleImages(body, voice.image_style_hint || "", 6); } catch { /* publie sans les images inline */ }
 
       await updateArticleBody(creds.shop_domain, token, blogId, articleId, body);
       const nowIso = new Date().toISOString();

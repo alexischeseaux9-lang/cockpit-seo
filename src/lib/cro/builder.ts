@@ -182,6 +182,12 @@ function styleBlock(br: Branding): string {
 .article-template__content img{max-width:100%;height:auto}
 .article-template__content figure{margin:30px 0}
 .article-template__content figure img{border-radius:14px}
+/* Image featured avec texte en overlay (label sombre + accroche accent), style cover. */
+.yv-feat{position:relative;margin:34px 0;border-radius:14px;overflow:hidden}
+.yv-feat img{width:100%;height:auto;display:block}
+.yv-feat-ov{position:absolute;top:0;left:0;display:flex;flex-direction:column;align-items:flex-start;gap:0;max-width:74%;padding:clamp(14px,4.5%,40px)}
+.yv-feat-lbl{display:inline-block;background:#111;color:#fff;font-weight:800;font-size:clamp(14px,2.5vw,26px);line-height:1.18;padding:6px 14px}
+.yv-feat-h{display:inline-block;background:${br.accent};color:#fff;font-weight:800;font-size:clamp(16px,3.1vw,32px);line-height:1.18;padding:6px 14px}
 /* Tables generees dans le corps (responsive : scroll horizontal sur mobile). */
 .article-template__content table{width:100%;border-collapse:collapse;font-size:15px;margin:6px 0}
 .article-template__content th{text-align:left;padding:12px 14px;font-weight:700;color:${br.textDark};background:#faf9f7;border-bottom:2px solid ${br.border}}
@@ -265,6 +271,7 @@ function styleBlock(br: Branding): string {
   .yv-card .yv-img{flex:0 0 auto}
   .yv-card .yv-img img{width:100%;height:auto;max-height:260px;border-radius:12px}
   .yv-card .yv-cta{text-align:center}
+  .yv-feat-ov{max-width:92%}
   .yv-reco-grid{grid-template-columns:repeat(2,1fr);gap:14px}
   .yv-trust-grid{grid-template-columns:repeat(2,1fr);gap:26px 18px}
   .article-template__content p{font-size:16.5px!important;line-height:1.72!important;margin-bottom:1.05em!important}
@@ -420,12 +427,13 @@ export function buildScroLiquid(opts: {
   if(origDate&&origDate.parentNode){ origDate.parentNode.insertBefore(frag(metaHtml), origDate); origDate.style.display='none'; }
   else { var hc=document.querySelector('.article-header__content'); if(hc) hc.appendChild(frag(metaHtml)); }
 
-  // Breadcrumb refait : Home / Blog / Titre, aligne a gauche, discret.
+  // Breadcrumb refait : Home / Blog uniquement (le titre est deja le H1 juste en dessous,
+  // inutile de le repeter; evite aussi le retour a la ligne et le gros espace sur mobile).
   var bc=document.querySelector('.article__category-nav');
   if(bc){
     var bl=bc.querySelector('a'); var bh=bl?bl.getAttribute('href'):'/blogs/news'; var bn=bl?bl.textContent.trim():'Blog';
     bc.className='yv-breadcrumb'; bc.removeAttribute('style');
-    bc.innerHTML='<a href="/">Home</a><span class="yv-bcs">/</span><a href="'+bh+'">'+escTxt(bn)+'</a>'+(titleTxt?'<span class="yv-bcs">/</span><span class="yv-bcc">'+escTxt(titleTxt)+'</span>':'');
+    bc.innerHTML='<a href="/">Home</a><span class="yv-bcs">/</span><a href="'+bh+'">'+escTxt(bn)+'</a>';
   }
 
   // Layout 2 colonnes : tout l'article a gauche (760px), sidebar a droite qui defile.

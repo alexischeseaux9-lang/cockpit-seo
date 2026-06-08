@@ -137,8 +137,17 @@ export async function POST(req: NextRequest, { params }: { params: { siteId: str
 
     const catHandles = (sb.top_categories?.manual_handles || []).filter(Boolean).length
       ? sb.top_categories.manual_handles
-      : [...collections].sort((a, b) => (b.productsCount || 0) - (a.productsCount || 0)).slice(0, 5).map((c) => c.handle);
-    const catItems: MiniLink[] = (catHandles || []).map((h: string) => cMap.get(h)).filter(Boolean).slice(0, 5).map((c: any) => ({ title: c.title, url: `/collections/${c.handle}`, image: c.image, count: c.productsCount }));
+      : [...collections]
+          .filter((c) => c.handle !== "frontpage" && (c.title || "").trim().toLowerCase() !== "home page")
+          .sort((a, b) => (b.productsCount || 0) - (a.productsCount || 0))
+          .slice(0, 5)
+          .map((c) => c.handle);
+    const catItems: MiniLink[] = (catHandles || [])
+      .map((h: string) => cMap.get(h))
+      .filter(Boolean)
+      .filter((c: any) => c.handle !== "frontpage" && (c.title || "").trim().toLowerCase() !== "home page")
+      .slice(0, 5)
+      .map((c: any) => ({ title: c.title, url: `/collections/${c.handle}`, image: c.image, count: c.productsCount }));
 
     const artHandles = (sb.top_articles?.manual_handles || []).filter(Boolean).length ? sb.top_articles.manual_handles : articles.slice(0, 3).map((a) => a.handle);
     const artItems: MiniLink[] = (artHandles || []).map((h: string) => aMap.get(h)).filter(Boolean).slice(0, 3).map((a: any) => ({ title: a.title, url: `/blogs/${blogHandle}/${a.handle}`, image: a.image }));

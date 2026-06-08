@@ -25,7 +25,31 @@ function extractJson(text: string): any {
   const start = raw.indexOf("{");
   const end = raw.lastIndexOf("}");
   if (start === -1 || end === -1) throw new Error("json_parse_failed");
-  return JSON.parse(raw.slice(start, end + 1));
+  const slice = raw.slice(start, end + 1);
+  try {
+    return JSON.parse(slice);
+  } catch {
+    // Fallback tolerant: un gros body_html contient parfois un guillemet non echappe
+    // qui casse JSON.parse. On extrait body_html + excerpt a la main et on de-echappe.
+    const unesc = (s: string) =>
+      s
+        .replace(/\\"/g, '"')
+        .replace(/\\n/g, "\n")
+        .replace(/\\t/g, "\t")
+        .replace(/\\r/g, "")
+        .replace(/\\\//g, "/")
+        .replace(/\\\\/g, "\\");
+    const bm = slice.match(/"body_html"\s*:\s*"/);
+    if (!bm) throw new Error("json_parse_failed");
+    const bStart = (bm.index as number) + bm[0].length;
+    const rest = slice.slice(bStart);
+    const boundary = rest.search(/"\s*,\s*"excerpt"\s*:/);
+    const bodyRaw = boundary >= 0 ? rest.slice(0, boundary) : rest.replace(/"\s*\}\s*$/, "");
+    const em = slice.match(/"excerpt"\s*:\s*"/);
+    let excRaw = "";
+    if (em) excRaw = slice.slice((em.index as number) + em[0].length).replace(/"\s*\}\s*$/, "").replace(/"\s*$/, "");
+    return { body_html: unesc(bodyRaw), excerpt: unesc(excRaw) };
+  }
 }
 
 export type ArticleBrief = {
@@ -127,6 +151,7 @@ export async function writeArticle(
   const tplFigure = `<figure style="margin:30px 0;"><img data-gen="DESCRIPTION_IMAGE_ANGLAIS_SANS_TEXTE" alt="ALT" style="width:100%;height:auto;border-radius:14px;display:block;background:#f1efe9;"><figcaption style="text-align:center;color:${b.textMuted};font-size:13px;margin-top:10px;font-style:italic;line-height:1.4;">LEGENDE</figcaption></figure>`;
   const tplTable = `<div style="overflow-x:auto;margin:28px 0;"><table style="width:100%;border-collapse:collapse;font-size:15px;"><thead><tr style="background:#faf9f7;border-bottom:2px solid ${b.border};"><th style="text-align:left;padding:12px 14px;font-weight:700;color:${b.textDark};">COLONNE 1</th><th style="text-align:left;padding:12px 14px;font-weight:700;color:${b.textDark};">COLONNE 2</th><th style="text-align:left;padding:12px 14px;font-weight:700;color:${b.textDark};">COLONNE 3</th></tr></thead><tbody><tr style="border-bottom:1px solid ${b.border};"><td style="padding:12px 14px;font-weight:600;color:${b.textDark};">CELLULE</td><td style="padding:12px 14px;color:${b.textMuted};">CELLULE</td><td style="padding:12px 14px;color:${b.textMuted};">CELLULE</td></tr></tbody></table></div>`;
   const tplFaq = `<div class="yv-faq"><details class="yv-faq-item"><summary>QUESTION ?</summary><div>REPONSE en 2 a 3 phrases.</div></details></div>`;
+  const tplFeatured = `<figure class="yv-feat"><img data-gen="DESCRIPTION_IMAGE_HORIZONTALE_ANGLAIS_SANS_TEXTE, large, sujet a droite et espace degage en haut a gauche pour poser du texte" alt="ALT"><div class="yv-feat-ov"><span class="yv-feat-lbl">LABEL_2_A_3_MOTS</span><span class="yv-feat-h">ACCROCHE_4_A_7_MOTS</span></div></figure>`;
   const iconNames = Object.keys(ICON_LIB).filter((k) => k !== "star" && k !== "bulb").join(", ");
 
   const prompt = `Redige un article de blog premium, immersif et optimise SEO. Objectif: que le lecteur ait du plaisir a lire (rythme, visuels, encadres), pas juste un mur de texte.
@@ -144,7 +169,7 @@ REGLES DE STRUCTURE (a respecter dans l'ordre):
 3. Juste apres, UN encadre "Key points at a glance" (4 a 6 puces resumant l'article).
 4. Ensuite UN encadre "essentials" (titre + 3 a 5 lignes a icone) qui met en avant les benefices/points cles pour le lecteur.
 5. Puis le corps: alterne <h2> + paragraphes TRES courts (1 a 3 phrases chacun), <h3> et <ul><li> quand utile.
-6. Insere 4 a 5 visuels <figure> a des moments naturels (jamais deux a la suite), chacun avec une description d'image precise (cadrage horizontal) et une legende.
+6. Le TOUT PREMIER visuel est un [FEATURED] (image cover horizontale avec texte en overlay: un label court + une accroche), juste apres les encadres d'ouverture. Ensuite insere 3 a 4 autres <figure> a des moments naturels (jamais deux a la suite), chacun avec une description d'image precise (cadrage horizontal) et une legende.
 7. Insere 1 a 2 encadres "Did you know?" avec un fait reellement interessant et verifiable.
 8. Insere UN tableau (composant [TABLE]) a un endroit pertinent: comparaison de matieres, de criteres ou d'options (2 a 4 colonnes, 3 a 6 lignes reelles).
 9. Termine le corps par une section pratique et actionnable (jamais "en conclusion").
@@ -166,6 +191,9 @@ Bibliotheque d'icones (colle l'une d'elles a la place du svg "check" selon le se
 - thermometer (temperature): ${ICON_LIB.thermometer}
 - feather (confort/legerete): ${ICON_LIB.feather}
 - check (general): ${ICON_LIB.check}
+
+[FEATURED] (UNE seule fois, comme tout premier visuel juste apres l'ouverture; LABEL = le sujet en 2 a 3 mots, ACCROCHE = un hook de 4 a 7 mots qui resume l'angle de l'article; data-gen = scene horizontale avec de l'espace degage en haut a gauche; garde la classe yv-feat et l'overlay tels quels):
+${tplFeatured}
 
 [FIGURE] (3 a 4 fois; data-gen = description visuelle en anglais, concrete, sans aucun texte dans l'image; legende courte et utile):
 ${tplFigure}
