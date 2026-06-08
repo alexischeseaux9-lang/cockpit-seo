@@ -111,9 +111,9 @@ const SB_ICONS = {
 // ---- CSS (scope .yv-cro*, couleurs interpolees depuis la palette) ----
 function styleBlock(br: Branding): string {
   return `<style>
-.yv-card{display:flex;gap:14px;align-items:center;border:1px solid ${br.border};border-radius:14px;background:${br.cardBg};padding:14px;max-width:480px;margin:28px auto;box-shadow:0 1px 3px rgba(0,0,0,.05);font-family:inherit}
-.yv-card .yv-img{flex:0 0 110px}
-.yv-card .yv-img img{width:110px;height:110px;object-fit:cover;border-radius:10px;display:block}
+.yv-card{display:flex;gap:18px;align-items:center;border:1px solid ${br.border};border-radius:16px;background:${br.cardBg};padding:18px;max-width:680px;margin:30px auto;box-shadow:0 2px 8px rgba(0,0,0,.06);font-family:inherit}
+.yv-card .yv-img{flex:0 0 150px}
+.yv-card .yv-img img{width:150px;height:150px;object-fit:cover;border-radius:12px;display:block}
 .yv-card .yv-bd{flex:1;min-width:0}
 .yv-card .yv-lbl{font-size:11px;font-weight:700;letter-spacing:.06em;text-transform:uppercase;color:${br.accent}}
 .yv-card .yv-ttl{font-size:15px;font-weight:600;color:${br.textDark};margin:3px 0;line-height:1.3}
@@ -125,8 +125,13 @@ function styleBlock(br: Branding): string {
 .yv-card .yv-bdg{font-size:11px;font-weight:700;color:#fff;background:${br.accent};border-radius:6px;padding:2px 7px}
 .yv-card .yv-cta{display:inline-block;background:${br.accent};color:#fff;padding:9px 18px;border-radius:9px;text-decoration:none;font-size:14px;font-weight:600}
 .yv-card .yv-cta:hover{background:${br.accentDark}}
-.yv-aside{max-width:320px;float:right;margin:8px 0 22px 28px;font-family:inherit}
-@media(max-width:849px){.yv-aside{float:none;margin:24px auto;max-width:480px}}
+.blog-contents{display:none!important}
+.yv-layout{display:flex;gap:36px;align-items:flex-start;max-width:1120px;margin:0 auto;width:100%;box-sizing:border-box}
+.yv-layout > .yv-content{flex:1 1 auto;min-width:0;max-width:760px}
+.yv-content img{max-width:100%;height:auto}
+.yv-aside{flex:0 0 320px;width:320px;align-self:flex-start;position:sticky;top:24px;margin:0;font-family:inherit}
+.yv-lead-img{width:100%;height:160px;object-fit:cover;border-radius:10px;display:block;margin-bottom:14px}
+@media(max-width:900px){.yv-layout{display:block;max-width:760px}.yv-aside{width:auto;position:static;margin:28px auto 0}}
 .yv-box{border:1px solid ${br.border};border-radius:14px;background:${br.cardBg};padding:16px;margin-bottom:16px}
 .yv-box h4{display:flex;align-items:center;gap:8px;font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.06em;color:${br.accent};margin:0 0 12px}
 .yv-box h4 svg{width:16px;height:16px;flex:0 0 auto}
@@ -190,7 +195,7 @@ function asideHtml(sb: SidebarResolved, sym: string): string {
   const lm = sb.lead_magnet;
   if (lm?.enabled) {
     const form = `<form method="post" action="/contact#yv-nl" accept-charset="UTF-8" class="yv-form"><input type="hidden" name="form_type" value="customer"><input type="hidden" name="utf8" value="&#10003;"><input type="hidden" name="contact[tags]" value="newsletter, blog"><input type="email" name="contact[email]" placeholder="Your email address" required><button type="submit" class="yv-fbtn">${esc(lm.cta_text || "S'inscrire")} →</button></form>`;
-    boxes.push(`<div class="yv-box yv-lead"><h4>${SB_ICONS.gift} ${esc(lm.title || "Welcome gift")}</h4>${lm.subtitle ? `<p>${esc(lm.subtitle)}</p>` : ""}${(lm.perks || []).filter(Boolean).map((p) => `<div class="perk">${SB_ICONS.check} ${esc(p)}</div>`).join("")}${lm.promo_code ? `<div class="promo">${esc(lm.promo_code)}</div>` : ""}${form}</div>`);
+    boxes.push(`<div class="yv-box yv-lead">${lm.image_url ? `<img class="yv-lead-img" src="${esc(lm.image_url)}" alt="${esc(lm.title || "Welcome gift")}" loading="lazy">` : ""}<h4>${SB_ICONS.gift} ${esc(lm.title || "Welcome gift")}</h4>${lm.subtitle ? `<p>${esc(lm.subtitle)}</p>` : ""}${(lm.perks || []).filter(Boolean).map((p) => `<div class="perk">${SB_ICONS.check} ${esc(p)}</div>`).join("")}${lm.promo_code ? `<div class="promo">${esc(lm.promo_code)}</div>` : ""}${form}</div>`);
   }
   if (sb.bestsellers?.enabled && sb.bestsellers.items.length) {
     boxes.push(`<div class="yv-box"><h4>${SB_ICONS.award} ${esc(sb.bestsellers.title || "Best sellers")}</h4>${sb.bestsellers.items.slice(0, 4).map((p) => miniProduct(p, sym)).join("")}<a class="yv-seeall" href="/collections/all">See all best sellers →</a></div>`);
@@ -239,7 +244,11 @@ export function buildScroLiquid(opts: {
   var PCTS=${JSON.stringify(pcts)};
   var ASIDE=${JSON.stringify(aside)};
   function frag(html){return document.createRange().createContextualFragment(html);}
-  if(ASIDE){ main.insertBefore(frag(ASIDE), main.firstChild); }
+  if(ASIDE){
+    var lay=document.createElement('div'); lay.className='yv-layout';
+    main.classList.add('yv-content');
+    if(main.parentNode){ main.parentNode.insertBefore(lay, main); lay.appendChild(main); lay.appendChild(frag(ASIDE)); }
+  }
   var notInj=function(el){return !el.closest('[data-cro-injected]');};
   var paras=Array.prototype.slice.call(main.querySelectorAll(':scope > p, :scope > h2, :scope > h3')).filter(notInj);
   if(paras.length<3){ paras=Array.prototype.slice.call(main.querySelectorAll('p, h2, h3')).filter(notInj); }
