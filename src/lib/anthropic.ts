@@ -250,6 +250,52 @@ export async function keywordScout(niche: string, count: number, lang: string): 
   return (out.keywords || []).map((k: string) => stripEmDashes(k)).slice(0, count);
 }
 
+// Gap de contenu vs concurrents : a partir des sujets concurrents + articles existants,
+// propose des idees d'articles pertinentes pour la niche (deduplique, priorise).
+export async function competitorGapKeywords(opts: {
+  niche: string;
+  lang: string;
+  count: number;
+  existingTitles: string[];
+  competitorTopics: string[];
+}): Promise<{ keyword: string; brief: string; priority: number }[]> {
+  const c = client();
+  const msg = await c.messages.create({
+    model: HAIKU,
+    max_tokens: 6000,
+    system: `Tu es un strategiste de contenu SEO e-commerce. ${STYLE_RULES}`,
+    messages: [
+      {
+        role: "user",
+        content: `Marque / niche: "${opts.niche}".
+Langue de sortie des mots-cles: ${opts.lang}.
+
+Articles DEJA publies par la marque (a NE PAS reproposer, evite les doublons proches):
+${opts.existingTitles.map((t) => "- " + t).join("\n") || "(aucun)"}
+
+Sujets d'articles trouves chez les concurrents:
+${opts.competitorTopics.map((t) => "- " + t).join("\n")}
+
+Tache: propose ${opts.count} idees d'articles de blog a forte valeur pour CETTE marque, inspirees des sujets concurrents mais UNIQUEMENT ceux pertinents pour sa niche. Exclus tout sujet hors-niche (un sujet qui releve du metier d'un concurrent mais pas du produit de cette marque) et tout doublon avec les articles deja publies. Priorise l'intent commercial et informationnel fort. priority de 1 (faible) a 10 (fort).
+
+Reponds UNIQUEMENT en JSON:
+{ "ideas": [ { "keyword": "mot-cle en ${opts.lang}", "brief": "angle + intention + audience en 1 phrase", "priority": 7 } ] }`,
+      },
+    ],
+  });
+  const text = msg.content.map((b) => (b.type === "text" ? b.text : "")).join("");
+  const out = extractJson(text);
+  const ideas = Array.isArray(out.ideas) ? out.ideas : [];
+  return ideas
+    .map((i: any) => ({
+      keyword: stripEmDashes(String(i.keyword || "")).slice(0, 200),
+      brief: stripEmDashes(String(i.brief || "")).slice(0, 2000),
+      priority: Math.max(0, Math.min(10, Math.round(Number(i.priority) || 5))),
+    }))
+    .filter((i: { keyword: string }) => i.keyword.length > 2)
+    .slice(0, opts.count);
+}
+
 // M5: audit + optimisation d'une fiche produit.
 export type ProductAudit = {
   audit_score: number;

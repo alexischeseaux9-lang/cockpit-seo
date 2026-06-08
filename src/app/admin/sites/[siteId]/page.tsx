@@ -513,6 +513,10 @@ function RoadmapTab({ siteId, site, api, setMsg, onSiteChanged }: { siteId: stri
   const [parsed, setParsed] = useState<ParseResult | null>(null);
   const [filter, setFilter] = useState<"upcoming" | "published" | "errors">("upcoming");
   const [daysShown, setDaysShown] = useState(7);
+  const [competRaw, setCompetRaw] = useState("");
+  const [proposals, setProposals] = useState<{ keyword: string; brief: string; priority: number; checked: boolean }[]>([]);
+  const [scoutBusy, setScoutBusy] = useState(false);
+  const [scoutNote, setScoutNote] = useState<string | null>(null);
 
   const load = useCallback(async () => {
     const { ok, json } = await api(`/api/admin/sites/${siteId}/jobs`);
@@ -573,6 +577,28 @@ function RoadmapTab({ siteId, site, api, setMsg, onSiteChanged }: { siteId: stri
     setBusy(null); setMsg(ok ? `${json.enqueued} mots-cles importes.` : `Erreur: ${json.error}`);
     if (ok) { setRaw(""); setParsed(null); load(); }
   }
+  async function scoutCompetitors() {
+    const urls = competRaw.split(/[\n,]+/).map((s) => s.trim()).filter(Boolean);
+    if (!urls.length) return;
+    setScoutBusy(true); setScoutNote("Analyse des concurrents (scrape blogs + IA, 30 a 90s)..."); setProposals([]);
+    const { ok, json } = await api(`/api/admin/sites/${siteId}/competitor-scout`, { method: "POST", body: JSON.stringify({ competitors: urls, count: 30 }) });
+    setScoutBusy(false);
+    if (ok && json.ideas?.length) {
+      setProposals(json.ideas.map((i: any) => ({ ...i, checked: true })));
+      setScoutNote(`${json.ideas.length} idees proposees a partir de ${json.scanned} articles concurrents scannes.`);
+    } else {
+      setScoutNote(json.error === "no_topics_found" ? "Aucun article trouve (blog des concurrents introuvable)." : `Erreur: ${json.error || "aucune idee"}`);
+    }
+  }
+  async function addProposals() {
+    const items = proposals.filter((p) => p.checked).map((p) => ({ keyword: p.keyword, brief: p.brief, priority: p.priority }));
+    if (!items.length) return;
+    setScoutBusy(true);
+    const { ok, json } = await api(`/api/admin/sites/${siteId}/jobs`, { method: "POST", body: JSON.stringify({ items }) });
+    setScoutBusy(false); setMsg(ok ? `${json.enqueued} articles ajoutes a la roadmap.` : `Erreur: ${json.error}`);
+    if (ok) { setProposals([]); setCompetRaw(""); setScoutNote(null); load(); }
+  }
+  const toggleProposal = (idx: number) => setProposals((ps) => ps.map((p, i) => (i === idx ? { ...p, checked: !p.checked } : p)));
   async function runNow(id: string) {
     setBusy(id); setMsg("Generation lancee (1 a 2 min)...");
     const { ok, json } = await api(`/api/admin/jobs/run`, { method: "POST", body: JSON.stringify({ job_id: id }) });
@@ -706,6 +732,45 @@ function RoadmapTab({ siteId, site, api, setMsg, onSiteChanged }: { siteId: stri
             {busy === "bulk" ? <Loader2 size={15} className="animate-spin" /> : <ListPlus size={15} />} Importer {parsed?.keywords.length ? `(${parsed.keywords.length})` : ""}
           </button>
         </div>
+      </div>
+
+      {/* Concurrents : gap de contenu */}
+      <div className="card-base">
+        <div className="mb-1 flex items-center justify-between gap-2">
+          <h3 className="flex items-center gap-2 text-sm font-semibold text-zinc-100"><Search size={16} className="text-emerald-300" /> Concurrents (gap de contenu)</h3>
+          {proposals.length > 0 && <span className="text-xs text-zinc-500">{proposals.filter((p) => p.checked).length}/{proposals.length} selectionnes</span>}
+        </div>
+        <p className="mb-3 text-xs text-zinc-500">Colle les URLs de tes concurrents (1 par ligne). On scanne leurs blogs, on garde les sujets pertinents pour ta niche (hors doublons avec tes articles) et on te propose des articles a empiler.</p>
+        <textarea value={competRaw} onChange={(e) => setCompetRaw(e.target.value)} rows={3} className="input-base mb-2 font-mono text-xs" placeholder={"https://concurrent1.com\nhttps://concurrent2.com"} />
+        <div className="flex flex-wrap items-center gap-2">
+          <button onClick={scoutCompetitors} disabled={scoutBusy || !competRaw.trim()} className="btn-primary">
+            {scoutBusy && !proposals.length ? <Loader2 size={15} className="animate-spin" /> : <Search size={15} />} Analyser les concurrents
+          </button>
+          {scoutNote && <span className="text-xs text-zinc-500">{scoutNote}</span>}
+        </div>
+
+        {proposals.length > 0 && (
+          <div className="mt-4 space-y-3">
+            <div className="flex flex-wrap items-center gap-2">
+              <button onClick={() => setProposals((ps) => ps.map((p) => ({ ...p, checked: true })))} className="btn-ghost btn-sm">Tout cocher</button>
+              <button onClick={() => setProposals((ps) => ps.map((p) => ({ ...p, checked: false })))} className="btn-ghost btn-sm">Tout decocher</button>
+              <button onClick={addProposals} disabled={scoutBusy || !proposals.some((p) => p.checked)} className="btn-emerald btn-sm ml-auto">
+                {scoutBusy ? <Loader2 size={13} className="animate-spin" /> : <Plus size={13} />} Ajouter {proposals.filter((p) => p.checked).length} a la roadmap
+              </button>
+            </div>
+            <div className="max-h-80 space-y-1.5 overflow-y-auto pr-1">
+              {proposals.map((p, i) => (
+                <button key={i} onClick={() => toggleProposal(i)} className={cn("flex w-full items-start gap-2.5 rounded-lg border px-3 py-2 text-left text-xs transition", p.checked ? "border-emerald-500/40 bg-emerald-500/[0.06]" : "border-white/[0.06] bg-black/20 hover:border-white/15")}>
+                  <span className={cn("mt-0.5 flex h-4 w-4 shrink-0 items-center justify-center rounded border", p.checked ? "border-emerald-500 bg-emerald-500 text-black" : "border-white/20")}>{p.checked && <Check size={11} />}</span>
+                  <span className="min-w-0 flex-1">
+                    <span className="flex items-center gap-2"><span className="text-zinc-200">{p.keyword}</span><span className="rounded bg-white/10 px-1.5 py-0.5 text-[10px] text-zinc-400">P{p.priority}</span></span>
+                    {p.brief && <span className="mt-0.5 block text-zinc-500">{p.brief}</span>}
+                  </span>
+                </button>
+              ))}
+            </div>
+          </div>
+        )}
       </div>
 
       {/* Calendrier editorial */}
