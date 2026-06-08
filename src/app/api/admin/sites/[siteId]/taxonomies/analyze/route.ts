@@ -4,6 +4,7 @@ import { isAdmin, unauthorized } from "@/lib/auth";
 import { getSiteContext, logChange } from "@/lib/site-context";
 import { analyzeCollection } from "@/lib/anthropic";
 import { analyzeSerp } from "@/lib/serp";
+import { listCollectionsLite, listProductsWithPrice } from "@/lib/shopify";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -19,7 +20,7 @@ export async function POST(req: NextRequest, { params }: { params: { siteId: str
   if (!parsed.success) return NextResponse.json({ error: "bad_request" }, { status: 400 });
 
   try {
-    const { supabase, voice } = await getSiteContext(params.siteId);
+    const { supabase, shop, token, voice } = await getSiteContext(params.siteId);
     const { data: tax } = await supabase
       .from("site_taxonomies")
       .select("*")
@@ -32,7 +33,22 @@ export async function POST(req: NextRequest, { params }: { params: { siteId: str
     let serp;
     try { serp = await analyzeSerp(tax.name, lang === "francais" ? "fr" : "us", lang === "francais" ? "fr" : "en"); } catch { serp = undefined; }
 
-    const analysis = await analyzeCollection(tax.name, tax.current_description || "", voice, serp);
+    // Cibles de maillage interne REELLES (collections + produits de la boutique), pour eviter
+    // les liens inventes vers des collections inexistantes.
+    let internalTargets: { name: string; url: string }[] = [];
+    try {
+      const [cols, prods] = await Promise.all([
+        listCollectionsLite(shop, token).catch(() => []),
+        listProductsWithPrice(shop, token, 60).catch(() => []),
+      ]);
+      const colTargets = cols
+        .filter((c) => c.handle !== tax.handle && c.handle !== "frontpage" && (c.title || "").trim().toLowerCase() !== "home page")
+        .map((c) => ({ name: c.title, url: `/collections/${c.handle}` }));
+      const prodTargets = prods.slice(0, 30).map((p) => ({ name: p.title, url: `/products/${p.handle}` }));
+      internalTargets = [...colTargets, ...prodTargets];
+    } catch { internalTargets = []; }
+
+    const analysis = await analyzeCollection(tax.name, tax.current_description || "", voice, serp, internalTargets);
     const now = new Date().toISOString();
     const { data, error } = await supabase
       .from("site_taxonomies")

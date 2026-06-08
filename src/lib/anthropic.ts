@@ -562,7 +562,8 @@ export async function analyzeCollection(
   name: string,
   currentDescription: string,
   voiceProfile: Record<string, any>,
-  serp?: SerpAnalysis
+  serp?: SerpAnalysis,
+  internalTargets: { name: string; url: string }[] = []
 ): Promise<CollectionAnalysis> {
   const c = client();
   const br = defaultBranding(voiceProfile); // palette de marque complete (la meme que le SCRO)
@@ -570,6 +571,9 @@ export async function analyzeCollection(
   const serpBlock = serp
     ? `\nConcurrents SERP:\n${serp.organic.slice(0, 6).map((o, i) => `${i + 1}. ${o.title}`).join("\n")}\nQuestions: ${serp.questions.slice(0, 6).join(" | ")}`
     : "";
+  const targetsBlock = internalTargets.length
+    ? `\n\nCIBLES DE MAILLAGE INTERNE (collections et produits REELS de la boutique). Utilise EXCLUSIVEMENT ces URLs pour les liens internes, n'en invente AUCUNE:\n${internalTargets.slice(0, 40).map((t) => `- ${t.name} -> ${t.url}`).join("\n")}`
+    : "\n\nAucune cible interne fournie: NE mets AUCUN lien interne (n'invente pas d'URL).";
   const sys = `Tu es un expert SEO + CRO e-commerce (parite Yavok). Tu ecris en ${lang}. ${STYLE_RULES}
 
 Tu optimises une PAGE COLLECTION (categorie). Le suggested_description_html que tu produis est premium, structure et auto-style (independant du theme).
@@ -587,7 +591,7 @@ STRUCTURE de suggested_description_html (dans l'ordre):
 2. 2 a 3 sections H2 utiles: comment choisir, criteres clefs, cas d'usage, ce qui distingue cette categorie.
 3. Un mini-guide d'aide au choix (liste a puces OU grille de cards a icones line-art).
 4. FAQ en accordeon <details>/<summary> (reprend exactement les memes Q/R que suggested_faq).
-5. Maillage interne: tisse 2 a 4 liens contextuels (les memes que suggested_internal_links) dans le texte.`;
+5. Maillage interne: tisse 2 a 4 liens contextuels dans le texte (balises <a href='...'>), en utilisant EXCLUSIVEMENT les URLs de la liste CIBLES DE MAILLAGE INTERNE du message. N'invente JAMAIS d'URL. Si aucune cible n'est fournie, ne mets aucun lien. suggested_internal_links doit refleter EXACTEMENT les liens reellement places dans le HTML.`;
   const msg = await c.messages.create({
     model: SONNET,
     max_tokens: 8000,
@@ -598,7 +602,7 @@ STRUCTURE de suggested_description_html (dans l'ordre):
         content: `Optimise cette page collection pour le SEO et la conversion.
 
 Nom de la collection: ${name}
-Description actuelle: ${currentDescription.slice(0, 2500) || "(vide)"}${serpBlock}
+Description actuelle: ${currentDescription.slice(0, 2500) || "(vide)"}${serpBlock}${targetsBlock}
 
 Reponds UNIQUEMENT en JSON STRICT (dans suggested_description_html, attributs HTML en guillemets simples):
 {
