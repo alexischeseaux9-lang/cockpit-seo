@@ -212,6 +212,7 @@ export function buildScroLiquid(opts: {
 
   const script = `<script>
 (function(){
+  function run(){
   if (document.querySelector('[data-yv-cro]')) return;
   var sels=['.article-template__content','.article-main','[itemprop="articleBody"]','.article__content','.post-content','.rte'];
   var main=null,i;
@@ -234,6 +235,8 @@ export function buildScroLiquid(opts: {
       else { var idx=Math.max(1,Math.min(paras.length-1,Math.floor(paras.length*pct))); var t=paras[idx]; if(t&&t.parentNode) t.parentNode.insertBefore(frag(INLINE[j]), t); }
     }
   }
+  }
+  if(document.readyState==='loading'){document.addEventListener('DOMContentLoaded',run);}else{run();}
 })();
 </script>`;
 
