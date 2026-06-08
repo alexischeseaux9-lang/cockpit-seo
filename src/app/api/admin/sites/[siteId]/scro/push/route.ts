@@ -64,7 +64,7 @@ export async function POST(req: NextRequest, { params }: { params: { siteId: str
     const aMap = new Map(articles.map((a) => [a.handle, a]));
 
     // Blocs inline (produit ou collection) resolus
-    const inline: InlineItem[] = blocks
+    let inline: InlineItem[] = blocks
       .map((b): InlineItem | null => {
         if (b.kind === "collection") {
           const c = cMap.get(b.handle);
@@ -76,6 +76,24 @@ export async function POST(req: NextRequest, { params }: { params: { siteId: str
         return { kind: "product", position: b.position, label: b.label || "Coup de coeur", cta: b.cta || "Voir le produit", title: b.override_title || p.title, url: `/products/${p.handle}`, image: p.image, price: p.price, compareAt: p.compareAt };
       })
       .filter((x): x is InlineItem => x !== null);
+
+    // Fallback Yavok : si inline active mais aucun bloc valide configure, on remplit
+    // automatiquement avec les meilleurs produits (cartes produit dans le contenu).
+    if (inlineEnabled && inline.length === 0 && products.length) {
+      const labels = ["Coup de coeur", "Best-seller", "Notre selection"];
+      const positions: (number | "end")[] = [0.25, 0.5, 0.78];
+      inline = products.slice(0, 3).map((p, i) => ({
+        kind: "product",
+        position: positions[i] ?? 0.5,
+        label: labels[i] ?? "Coup de coeur",
+        cta: "Voir le produit",
+        title: p.title,
+        url: `/products/${p.handle}`,
+        image: p.image,
+        price: p.price,
+        compareAt: p.compareAt,
+      }));
+    }
 
     // Sidebar resolue
     const bestHandles =
