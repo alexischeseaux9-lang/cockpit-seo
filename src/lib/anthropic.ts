@@ -565,32 +565,51 @@ export async function analyzeCollection(
   serp?: SerpAnalysis
 ): Promise<CollectionAnalysis> {
   const c = client();
+  const br = defaultBranding(voiceProfile); // palette de marque complete (la meme que le SCRO)
   const lang = voiceProfile.content_language || "francais";
   const serpBlock = serp
     ? `\nConcurrents SERP:\n${serp.organic.slice(0, 6).map((o, i) => `${i + 1}. ${o.title}`).join("\n")}\nQuestions: ${serp.questions.slice(0, 6).join(" | ")}`
     : "";
+  const sys = `Tu es un expert SEO + CRO e-commerce (parite Yavok). Tu ecris en ${lang}. ${STYLE_RULES}
+
+Tu optimises une PAGE COLLECTION (categorie). Le suggested_description_html que tu produis est premium, structure et auto-style (independant du theme).
+
+REGLES DURES:
+- Aucun em-dash ni en-dash, aucun emoji, aucun superlatif vide.
+- H2 et H3 keyword-rich (jamais "Description" / "Avantages" generiques): le nom de la collection ou une variante long-tail apparait dans les titres.
+- Icones uniquement en SVG inline line-art (viewBox='0 0 24 24', fill='none', stroke='currentColor', stroke-width='1.5').
+- Dans suggested_description_html, utilise des guillemets SIMPLES pour TOUS les attributs HTML (class='cc', style='...').
+- suggested_description_html COMMENCE par un <style> scope a la classe .cc (responsive, premium, theme-independent: .cc h2 font-size 1.6rem desktop et 1.4rem sous 640px, paragraphes line-height 1.7, cards, accordeon FAQ via <details>/<summary>), puis enveloppe tout dans <div class='cc'>.
+- PALETTE DE MARQUE a utiliser dans le <style> (hex EXACTS, n'invente aucune autre couleur): accent (titres soulignes, filets, icones, liens, marqueurs FAQ) = ${br.accent}; accent fonce = ${br.accentDark}; fond des cards = ${br.cardBg}; bordures = ${br.border}; texte principal = ${br.textDark}; texte secondaire = ${br.textMuted}.
+
+STRUCTURE de suggested_description_html (dans l'ordre):
+1. Intro hook: 1 a 2 phrases (ce que la categorie offre + benefice concret).
+2. 2 a 3 sections H2 utiles: comment choisir, criteres clefs, cas d'usage, ce qui distingue cette categorie.
+3. Un mini-guide d'aide au choix (liste a puces OU grille de cards a icones line-art).
+4. FAQ en accordeon <details>/<summary> (reprend exactement les memes Q/R que suggested_faq).
+5. Maillage interne: tisse 2 a 4 liens contextuels (les memes que suggested_internal_links) dans le texte.`;
   const msg = await c.messages.create({
     model: SONNET,
-    max_tokens: 4000,
-    system: `Tu es un expert SEO e-commerce. Tu ecris en ${lang}. ${STYLE_RULES}`,
+    max_tokens: 8000,
+    system: sys,
     messages: [
       {
         role: "user",
         content: `Optimise cette page collection pour le SEO et la conversion.
 
-Nom: ${name}
-Description actuelle: ${currentDescription.slice(0, 2000) || "(vide)"}${serpBlock}
+Nom de la collection: ${name}
+Description actuelle: ${currentDescription.slice(0, 2500) || "(vide)"}${serpBlock}
 
-Reponds UNIQUEMENT en JSON:
+Reponds UNIQUEMENT en JSON STRICT (dans suggested_description_html, attributs HTML en guillemets simples):
 {
-  "quality_score": <0-100>,
+  "quality_score": 0,
   "intent_class": "commercial|informational|hybrid|navigational",
-  "suggested_h1": "H1 optimise",
-  "suggested_description_html": "<description HTML riche, H2/H3, optimisee>",
-  "suggested_meta_title": "< 60 caracteres",
-  "suggested_meta_description": "< 155 caracteres",
-  "suggested_faq": [{"q":"question","a":"reponse"}],
-  "suggested_internal_links": [{"anchor":"texte","url":"/collections/..."}],
+  "suggested_h1": "H1 optimise avec le mot-cle",
+  "suggested_description_html": "<style>...</style><div class='cc'> ... structure complete des 5 points ... </div>",
+  "suggested_meta_title": "max 60 caracteres",
+  "suggested_meta_description": "max 155 caracteres",
+  "suggested_faq": [{"q":"question reelle","a":"reponse"}],
+  "suggested_internal_links": [{"anchor":"texte d'ancre","url":"/collections/handle-plausible"}],
   "suggested_schema": {"@context":"https://schema.org","@type":"CollectionPage"}
 }`,
       },
