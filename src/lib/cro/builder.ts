@@ -32,16 +32,18 @@ export type SidebarConfig = {
   author: { enabled: boolean; name: string; role: string; bio: string; image_url?: string; trust_badges: string[] };
 };
 
+// Palette de marque. Pilotee par voice_profile.branding (objet complet, editable
+// dans l'onglet SCRO). Fallback sur branding_accent_hex puis sur des valeurs neutres.
 export function defaultBranding(voice: Record<string, any>): Branding {
-  const accent = voice?.branding_accent_hex || "#10b981";
+  const b = voice?.branding && typeof voice.branding === "object" ? voice.branding : {};
   return {
-    accent,
-    accentDark: "#0b7a5a",
-    cardBg: "#ffffff",
-    textDark: "#18181b",
-    textMuted: "#6b7280",
-    border: "#e5e7eb",
-    ratingColor: "#f59e0b",
+    accent: b.accent || voice?.branding_accent_hex || "#10b981",
+    accentDark: b.accentDark || "#0b7a5a",
+    cardBg: b.cardBg || "#ffffff",
+    textDark: b.textDark || "#18181b",
+    textMuted: b.textMuted || "#6b7280",
+    border: b.border || "#e5e7eb",
+    ratingColor: b.ratingColor || "#f59e0b",
   };
 }
 

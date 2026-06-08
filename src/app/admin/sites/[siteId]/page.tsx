@@ -1594,11 +1594,13 @@ function ScroTab({ siteId, api, setMsg }: { siteId: string; api: ApiFn; setMsg: 
   const [catalog, setCatalog] = useState<any>(null);
   const [busy, setBusy] = useState<string | null>(null);
   const [dirty, setDirty] = useState(false);
+  const [branding, setBranding] = useState<Record<string, string>>({});
+  const [brandingDirty, setBrandingDirty] = useState(false);
 
   const load = useCallback(async () => {
     const [c, cat] = await Promise.all([api(`/api/admin/sites/${siteId}/scro`), api(`/api/admin/sites/${siteId}/scro/catalog`)]);
     if (c.ok) setConfig(c.json.config);
-    if (cat.ok) setCatalog(cat.json);
+    if (cat.ok) { setCatalog(cat.json); setBranding(cat.json.branding || {}); setBrandingDirty(false); }
   }, [siteId, api]);
   useEffect(() => { load(); }, [load]);
 
@@ -1610,6 +1612,13 @@ function ScroTab({ siteId, api, setMsg }: { siteId: string; api: ApiFn; setMsg: 
     const { ok, json } = await api(`/api/admin/sites/${siteId}/scro`, { method: "POST", body: JSON.stringify(config) });
     setBusy(null); setMsg(ok ? "Config sauvegardee." : `Erreur: ${json.error}`);
     if (ok) { setConfig(json.config); setDirty(false); }
+  }
+  const setBrandColor = (k: string, v: string) => { setBranding((b) => ({ ...b, [k]: v })); setBrandingDirty(true); };
+  async function saveBranding() {
+    setBusy("branding");
+    const { ok, json } = await api(`/api/admin/sites/update-profile`, { method: "POST", body: JSON.stringify({ site_id: siteId, voice_profile: { branding } }) });
+    setBusy(null); setMsg(ok ? "Palette de marque enregistree (les blocs CRO suivront au prochain push)." : `Erreur: ${json.error}`);
+    if (ok) setBrandingDirty(false);
   }
   async function push() {
     setBusy("push"); setMsg("Push des blocs CRO dans le theme...");
@@ -1650,7 +1659,6 @@ function ScroTab({ siteId, api, setMsg }: { siteId: string; api: ApiFn; setMsg: 
   function removeBlock(i: number) { patch({ blocks: config.blocks.filter((_: any, j: number) => j !== i) }); }
 
   if (!config || !catalog) return <Spinner label="Chargement SCRO..." />;
-  const br = catalog.branding || {};
   const sb = config.sidebar || {};
   const lead = sb.lead_magnet || {};
   const best = sb.bestsellers || {};
@@ -1684,18 +1692,36 @@ function ScroTab({ siteId, api, setMsg }: { siteId: string; api: ApiFn; setMsg: 
         )}
       </div>
 
-      {/* Palette */}
+      {/* Palette de marque (editable) */}
       <div className="card-base">
-        <h3 className="text-sm font-semibold text-zinc-100">Palette detectee</h3>
-        <p className="mb-3 mt-1 text-xs text-zinc-500">Auto depuis le voice_profile du site. Les boutons et accents des blocs CRO suivront ces couleurs.</p>
-        <div className="flex flex-wrap gap-4">
-          {["accent", "accentDark", "cardBg", "border", "textDark", "ratingColor"].map((k) => (
-            <div key={k} className="text-center">
-              <div className="h-9 w-9 rounded-md border border-white/10" style={{ background: br[k] || "#222" }} />
-              <div className="mt-1 font-mono text-[10px] text-zinc-500">{k}</div>
-              <div className="font-mono text-[10px] text-zinc-600">{br[k] || "-"}</div>
-            </div>
-          ))}
+        <div className="mb-1 flex flex-wrap items-center justify-between gap-2">
+          <h3 className="text-sm font-semibold text-zinc-100">Palette de marque</h3>
+          <button onClick={saveBranding} disabled={!brandingDirty || busy === "branding"} className="btn-ghost btn-sm">
+            {busy === "branding" ? <Loader2 size={13} className="animate-spin" /> : <Check size={13} />} Enregistrer la palette
+          </button>
+        </div>
+        <p className="mb-3 text-xs text-zinc-500">Les boutons et accents des blocs CRO suivront ces couleurs. Clique un carre pour choisir, ou edite le code hex.</p>
+        <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-6">
+          {([
+            ["accent", "Accent / CTA"],
+            ["accentDark", "Accent fonce"],
+            ["cardBg", "Fond carte"],
+            ["border", "Bordure"],
+            ["textDark", "Texte"],
+            ["ratingColor", "Etoiles / prix"],
+          ] as [string, string][]).map(([k, label]) => {
+            const val = branding[k] || "";
+            const safe = /^#[0-9a-fA-F]{6}$/.test(val) ? val : "#000000";
+            return (
+              <div key={k}>
+                <label className="relative block h-12 cursor-pointer overflow-hidden rounded-lg border border-white/10" style={{ background: val || "#222" }}>
+                  <input type="color" value={safe} onChange={(e) => setBrandColor(k, e.target.value)} className="absolute inset-0 h-full w-full cursor-pointer opacity-0" />
+                </label>
+                <div className="mt-1 text-[11px] text-zinc-400">{label}</div>
+                <input value={val} onChange={(e) => setBrandColor(k, e.target.value)} className="input-base mt-1 px-2 py-1 font-mono text-[10px]" placeholder="#000000" />
+              </div>
+            );
+          })}
         </div>
       </div>
 
