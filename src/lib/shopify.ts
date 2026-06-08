@@ -369,9 +369,22 @@ export async function putThemeAsset(shop: string, token: string, themeId: string
   }
 }
 
-export async function listCollectionsLite(shop: string, token: string): Promise<{ handle: string; title: string; image: string | null; productsCount: number }[]> {
+export async function listCollectionsLite(shop: string, token: string): Promise<{ id: number; handle: string; title: string; image: string | null; productsCount: number }[]> {
   const cols = await listCollections(shop, token);
-  return cols.map((c) => ({ handle: c.handle, title: c.title, image: null, productsCount: 0 }));
+  return cols.map((c) => ({ id: c.id, handle: c.handle, title: c.title, image: c.image_url ?? null, productsCount: 0 }));
+}
+
+// Image de secours pour une collection sans image : le 1er produit de la collection.
+export async function getCollectionFirstProductImage(shop: string, token: string, collectionId: number | string): Promise<string | null> {
+  try {
+    const res = await fetch(`${apiBase(shop)}/collections/${collectionId}/products.json?limit=1`, { headers: { "X-Shopify-Access-Token": token }, cache: "no-store" });
+    if (!res.ok) return null;
+    const d = await res.json();
+    const p = (d.products || [])[0];
+    return p?.image?.src || p?.images?.[0]?.src || null;
+  } catch {
+    return null;
+  }
 }
 
 export type ShopifyArticle = {

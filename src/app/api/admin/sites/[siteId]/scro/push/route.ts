@@ -4,7 +4,7 @@ import { getSiteContext } from "@/lib/site-context";
 import {
   listThemes, getThemeAsset, putThemeAsset,
   listProductsWithPrice, listCollectionsLite, getShopCurrency,
-  getDefaultBlogId, getDefaultBlogHandle, listArticles,
+  getDefaultBlogId, getDefaultBlogHandle, listArticles, getCollectionFirstProductImage,
   type CroProduct,
 } from "@/lib/shopify";
 import { buildScroLiquid, injectScro, defaultBranding, type InlineItem, type SidebarResolved, type MiniProduct, type MiniLink } from "@/lib/cro/builder";
@@ -47,9 +47,28 @@ export async function POST(req: NextRequest, { params }: { params: { siteId: str
     if (needProducts) { try { products = await listProductsWithPrice(shop, token, 250); } catch { products = []; } }
     const pMap = new Map(products.map((p) => [p.handle, p]));
 
-    let collections: { handle: string; title: string; image: string | null }[] = [];
+    let collections: { id: number; handle: string; title: string; image: string | null }[] = [];
     if (needCollections) { try { collections = await listCollectionsLite(shop, token); } catch { collections = []; } }
     const cMap = new Map(collections.map((c) => [c.handle, c]));
+
+    // Image des collections utilisees : image de la collection, sinon 1er produit.
+    if (needCollections) {
+      const catManual = (sb.top_categories?.manual_handles || []).filter(Boolean);
+      const catNeeded = catManual.length ? catManual : collections.slice(0, 3).map((c) => c.handle);
+      const usedCol = new Set<string>([
+        ...blocks.filter((b) => b.kind === "collection" && b.handle).map((b) => b.handle),
+        ...(sb.top_categories?.enabled ? catNeeded : []),
+      ]);
+      await Promise.all(
+        Array.from(usedCol).map(async (h) => {
+          const c = cMap.get(h);
+          if (c && !c.image && c.id) {
+            const img = await getCollectionFirstProductImage(shop, token, c.id);
+            if (img) c.image = img;
+          }
+        }),
+      );
+    }
 
     let articles: { handle: string; title: string; image: string | null }[] = [];
     let blogHandle = "news";
