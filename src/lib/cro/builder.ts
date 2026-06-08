@@ -169,6 +169,7 @@ function styleBlock(br: Branding): string {
 .yv-card .yv-cta{display:inline-block;background:${br.accent};color:#fff;padding:9px 18px;border-radius:9px;text-decoration:none;font-size:14px;font-weight:600}
 .yv-card .yv-cta:hover{background:${br.accentDark}}
 .blog-contents{display:none!important}
+.article-template__social-sharing,.article-template__back{display:none!important}
 /* Layout 2 colonnes : englobe tout l'article (image + titre + contenu) a gauche, sidebar a droite. */
 .yv-layout{display:flex;gap:40px;align-items:flex-start;max-width:1160px;margin:0 auto;width:100%;padding:0 24px;box-sizing:border-box}
 .yv-layout > .yv-content{flex:1 1 auto;min-width:0;max-width:760px}
@@ -203,6 +204,9 @@ function styleBlock(br: Branding): string {
 /* La sidebar defile avec l'article (pas de sticky). */
 .yv-aside{flex:0 0 320px;width:320px;align-self:flex-start;margin:0;font-family:inherit}
 .yv-lead-img{width:100%;height:160px;object-fit:cover;border-radius:10px;display:block;margin-bottom:14px}
+.yv-lead-imgwrap{position:relative;margin-bottom:14px}
+.yv-lead-imgwrap .yv-lead-img{margin-bottom:0}
+.yv-lead-badge{position:absolute;top:10px;left:10px;background:${br.accent};color:#fff;font-weight:800;font-size:13px;letter-spacing:.02em;padding:5px 11px;border-radius:8px;box-shadow:0 2px 6px rgba(0,0,0,.2)}
 .yv-box{border:1px solid ${br.border};border-radius:14px;background:${br.cardBg};padding:16px;margin-bottom:16px}
 .yv-box h4{display:flex;align-items:center;gap:8px;font-size:11px;font-weight:700;text-transform:uppercase;letter-spacing:.06em;color:${br.accent};margin:0 0 12px}
 .yv-box h4 svg{width:16px;height:16px;flex:0 0 auto}
@@ -319,7 +323,7 @@ function asideHtml(sb: SidebarResolved, sym: string): string {
   const lm = sb.lead_magnet;
   if (lm?.enabled) {
     const form = `<form method="post" action="/contact#yv-nl" accept-charset="UTF-8" class="yv-form"><input type="hidden" name="form_type" value="customer"><input type="hidden" name="utf8" value="&#10003;"><input type="hidden" name="contact[tags]" value="newsletter, blog"><input type="email" name="contact[email]" placeholder="Your email address" required><button type="submit" class="yv-fbtn">${esc(lm.cta_text || "S'inscrire")} →</button></form>`;
-    boxes.push(`<div class="yv-box yv-lead">${lm.image_url ? `<img class="yv-lead-img" src="${esc(lm.image_url)}" alt="${esc(lm.title || "Welcome gift")}" loading="lazy">` : ""}<h4>${SB_ICONS.gift} ${esc(lm.title || "Welcome gift")}</h4>${lm.subtitle ? `<p>${esc(lm.subtitle)}</p>` : ""}${(lm.perks || []).filter(Boolean).map((p) => `<div class="perk">${SB_ICONS.check} ${esc(p)}</div>`).join("")}${lm.promo_code ? `<div class="promo">${esc(lm.promo_code)}</div>` : ""}${form}</div>`);
+    boxes.push(`<div class="yv-box yv-lead">${lm.image_url ? `<div class="yv-lead-imgwrap"><img class="yv-lead-img" src="${esc(lm.image_url)}" alt="${esc(lm.title || "Welcome gift")}" loading="lazy"><span class="yv-lead-badge">5% OFF</span></div>` : ""}<h4>${SB_ICONS.gift} ${esc(lm.title || "Welcome gift")}</h4>${lm.subtitle ? `<p>${esc(lm.subtitle)}</p>` : ""}${(lm.perks || []).filter(Boolean).map((p) => `<div class="perk">${SB_ICONS.check} ${esc(p)}</div>`).join("")}${lm.promo_code ? `<div class="promo">${esc(lm.promo_code)}</div>` : ""}${form}</div>`);
   }
   if (sb.bestsellers?.enabled && sb.bestsellers.items.length) {
     boxes.push(`<div class="yv-box"><h4>${SB_ICONS.award} ${esc(sb.bestsellers.title || "Best sellers")}</h4>${sb.bestsellers.items.slice(0, 4).map((p) => miniProduct(p, sym)).join("")}<a class="yv-seeall" href="/collections/all">See all best sellers →</a></div>`);
@@ -447,6 +451,9 @@ export function buildScroLiquid(opts: {
     var lay=mkdiv('yv-layout'); lay.appendChild(col); lay.appendChild(frag(ASIDE));
     if(bcw) art.appendChild(bcw);
     art.appendChild(lay);
+    // La featured image (overlay) devient la cover en haut, a la place du hero du theme.
+    var feat=col.querySelector('.yv-feat');
+    if(feat){ feat.style.marginTop='0'; var heroC=col.querySelector('.article-template__hero-container'); if(heroC&&heroC.parentNode){ heroC.parentNode.replaceChild(feat, heroC); } else { col.insertBefore(feat, col.firstChild); } }
     host=art;
   } else {
     host=content.parentNode||content;

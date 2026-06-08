@@ -165,11 +165,11 @@ Ton: ${voiceProfile.tone_description || "expert, accessible, concret"}${voicePro
 
 REGLES DE STRUCTURE (a respecter dans l'ordre):
 1. Pas de <h1>, pas de table des matieres, pas de date (geres a part).
-2. Ouverture: 2 paragraphes courts qui accrochent des la 1ere phrase (pas de cliche).
+2. Le TOUT PREMIER element du body est le [FEATURED] (il deviendra la grande image cover en haut de l'article). Juste apres: l'ouverture, 2 paragraphes courts qui accrochent des la 1ere phrase (pas de cliche).
 3. Juste apres, UN encadre "Key points at a glance" (4 a 6 puces resumant l'article).
 4. Ensuite UN encadre "essentials" (titre + 3 a 5 lignes a icone) qui met en avant les benefices/points cles pour le lecteur.
 5. Puis le corps: alterne <h2> + paragraphes TRES courts (1 a 3 phrases chacun), <h3> et <ul><li> quand utile.
-6. Le TOUT PREMIER visuel est un [FEATURED] (image cover horizontale avec texte en overlay: un label court + une accroche), juste apres les encadres d'ouverture. Ensuite insere 3 a 4 autres <figure> a des moments naturels (jamais deux a la suite), chacun avec une description d'image precise (cadrage horizontal) et une legende.
+6. Toutes les AUTRES images sont des <figure> PLAIN (sans overlay): 3 a 4, a des moments naturels (jamais deux a la suite), chacune avec une legende. Leur data-gen doit etre une scene SPECIFIQUE et realiste (voir la consigne du composant [FIGURE]).
 7. Insere 1 a 2 encadres "Did you know?" avec un fait reellement interessant et verifiable.
 8. Insere UN tableau (composant [TABLE]) a un endroit pertinent: comparaison de matieres, de criteres ou d'options (2 a 4 colonnes, 3 a 6 lignes reelles).
 9. Termine le corps par une section pratique et actionnable (jamais "en conclusion").
@@ -192,10 +192,10 @@ Bibliotheque d'icones (colle l'une d'elles a la place du svg "check" selon le se
 - feather (confort/legerete): ${ICON_LIB.feather}
 - check (general): ${ICON_LIB.check}
 
-[FEATURED] (UNE seule fois, comme tout premier visuel juste apres l'ouverture; LABEL = le sujet en 2 a 3 mots, ACCROCHE = un hook de 4 a 7 mots qui resume l'angle de l'article; data-gen = scene horizontale avec de l'espace degage en haut a gauche; garde la classe yv-feat et l'overlay tels quels):
+[FEATURED] (UNE seule fois, le TOUT PREMIER element du body; LABEL = le sujet en 2 a 3 mots, ACCROCHE = un hook de 4 a 7 mots qui resume l'angle de l'article; data-gen = scene SPECIFIQUE et realiste liee au sujet, horizontale et large, avec un espace degage en haut a gauche pour poser le texte; garde la classe yv-feat et l'overlay tels quels):
 ${tplFeatured}
 
-[FIGURE] (3 a 4 fois; data-gen = description visuelle en anglais, concrete, sans aucun texte dans l'image; legende courte et utile):
+[FIGURE] (3 a 4 fois, PLAIN; data-gen = une scene SPECIFIQUE, concrete et realiste qui illustre EXACTEMENT le point de la section ou elle se trouve: lieu precis, sujet, action, details materiels lies au sujet de l'article (par ex. gros plan macro sur la maille d'une chaussette en laine merinos humide, un pied glisse dans une botte de securite a embout acier sur un chantier, deux paires de chaussettes cote a cote pour comparer l'epaisseur). Evite absolument le stock photo generique. Anglais, cadrage horizontal, photographique, sans aucun texte dans l'image; legende courte et utile):
 ${tplFigure}
 
 [DID YOU KNOW] (1 a 2 fois):

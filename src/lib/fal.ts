@@ -51,7 +51,7 @@ export async function fillArticleImages(html: string, styleHint: string, cap = 4
       const desc = dm ? dm[1].replace(/&quot;/g, '"').replace(/&amp;/g, "&").slice(0, 400) : "";
       try {
         const url = await generateImage(
-          `Editorial blog photo, wide horizontal composition. ${desc}. Style: ${style}. High quality, sharp focus, natural light, clean composition, no text, no words, no watermark.`,
+          `Editorial documentary photograph, wide horizontal composition, photorealistic and highly specific (not generic stock). Scene: ${desc}. Render the concrete real world details true to life. Style: ${style}. Sharp focus, natural light, realistic textures and materials, no text, no words, no watermark, no logos.`,
           "fal-ai/flux/dev",
           "landscape_16_9",
         );
