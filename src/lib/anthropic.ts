@@ -471,7 +471,7 @@ export type ProductOptimized = {
   image_alts: string[];
   channel_meta: {
     shopify: { title: string; meta_title: string; meta_description: string; tags: string[] };
-    google_shopping: { title: string; description: string; brand?: string; condition: string };
+    google_shopping: { title: string; description: string; gtin?: string; brand?: string; condition: string; color?: string; size?: string };
     meta_ads: { headline: string; primary_text: string; description: string };
   };
   cro_signals: { urgency_present: boolean; social_proof_present: boolean; risk_reversal_present: boolean; delivery_clarity: boolean };
@@ -486,11 +486,28 @@ export async function optimizeProductFull(
 ): Promise<ProductOptimized> {
   const c = client();
   const lang = voiceProfile.content_language || "francais";
-  const sys = `Tu es expert CRO + SEO e-commerce. Tu ecris en ${lang}. ${STYLE_RULES}
-Regles HTML: H2/H3 obligatoires avec le mot-cle ou variante long-tail (jamais "Description" ou "Key Benefits" generiques).
-Icones uniquement en SVG inline line-art (viewBox 24x24, stroke=currentColor), jamais d'emoji.
-Structure: hero, 3 trust badges (SVG inline), story (2-3 paragraphes), grille de 3-4 benefices, table de caracteristiques, liste d'entretien, FAQ.
-Utilise la couleur d'accent ${accent} dans les badges et separateurs.`;
+  const tone = voiceProfile.product_tone_description || voiceProfile.tone_description || "expert, concret, rassurant";
+  const sys = `Tu es un redacteur CRO + SEO e-commerce expert (parite Yavok). Tu ecris en ${lang}. ${STYLE_RULES}
+
+Tu produis une fiche produit PREMIUM, structuree et auto-stylee (independante du theme Shopify).
+
+REGLES DURES:
+- Aucun em-dash ni en-dash, aucun emoji, aucun superlatif vide ("le meilleur", "incroyable", "revolutionnaire", "unique en son genre").
+- H2 et H3 OBLIGATOIRES. Chaque titre integre le mot-cle principal du produit ou une variante long-tail. JAMAIS de titre generique ("Description", "Caracteristiques", "Avantages", "Key Benefits", "Features"). Exemples: "Pourquoi {produit} change {usage}", "{produit}: {claim factuel et specifique}".
+- Icones uniquement en SVG inline line-art (viewBox='0 0 24 24', fill='none', stroke='currentColor', stroke-width='1.5', stroke-linecap='round'). Choisis des icones coherentes avec la NICHE du produit (deduis-la du titre et du contenu: maison/deco, sport, mode, outdoor, tech, bien-etre, etc.).
+- Couleur d'accent ${accent}: filets, badges, icones, separateurs.
+- IMPORTANT: dans le body_html, utilise des guillemets SIMPLES pour TOUS les attributs HTML (class='pp', style='...', viewBox='...') afin que le JSON reste valide.
+- Le body_html COMMENCE par un bloc <style> scope a la classe wrapper .pp qui rend la fiche responsive et premium SANS dependre du theme: .pp h2 font-size 1.75rem (1.5rem sous 640px), .pp h3 1.25rem, paragraphes aeres (line-height 1.7), grilles de cards, table stylee, accordeon FAQ via <details>/<summary>. Tout le contenu est enveloppe dans <div class='pp'>...</div>.
+
+STRUCTURE EXACTE du body_html (dans cet ordre):
+1. HERO HOOK: 1 a 2 phrases punchy au-dessus du fold (claim + benefice concret et specifique).
+2. TRUST BADGES: 3 badges en ligne (icone SVG line-art + label court): livraison, garantie, qualite/avis.
+3. STORY: 2 a 3 paragraphes (origine, matiere, fabrication, usage reel et sensoriel).
+4. BENEFITS GRID: 3 a 4 cards (icone SVG + titre court avec keyword + 1 phrase de preuve concrete).
+5. FEATURES TABLE: table des specifications techniques reelles (matiere, dimensions, poids, mecanisme, etc.).
+6. CARE LIST: entretien etape par etape (liste).
+7. SOCIOMATCHER: 2 colonnes "Pour qui" / "Pas pour qui" (3 a 4 puces honnetes chacune).
+8. FAQ: accordeon <details>/<summary>, 3 a 5 vraies questions/reponses (objections d'achat reelles).`;
   const msg = await c.messages.create({
     model: SONNET,
     max_tokens: 14000,
@@ -498,23 +515,23 @@ Utilise la couleur d'accent ${accent} dans les badges et separateurs.`;
     messages: [
       {
         role: "user",
-        content: `Optimise cette fiche produit.
+        content: `Optimise cette fiche produit pour le SEO et la conversion.
 Titre actuel: ${title}
-HTML actuel: ${bodyHtml.slice(0, 3000) || "(vide)"}
-Ton produit: ${voiceProfile.product_tone_description || voiceProfile.tone_description || "expert, rassurant"}
+HTML actuel: ${bodyHtml.slice(0, 4000) || "(vide)"}
+Ton: ${tone}
 
-Reponds UNIQUEMENT en JSON STRICT:
+Reponds UNIQUEMENT en JSON STRICT (rien avant ni apres). body_html = les 8 sections completes, commencant par <style> scope .pp, attributs HTML en guillemets simples:
 {
-  "title": "titre optimise",
-  "body_html": "<HTML complet structure avec H2/H3, SVG inline, classes Tailwind inline pour H2 font-size>",
-  "image_alts": ["alt text par image"],
+  "title": "titre produit optimise (clair, avec keyword, sans bourrage)",
+  "body_html": "<style>...</style><div class='pp'> ... 8 sections ... </div>",
+  "image_alts": ["alt descriptif par image, avec keyword"],
   "channel_meta": {
-    "shopify": { "title": "", "meta_title": "<60c", "meta_description": "<155c", "tags": ["3-5 tags"] },
-    "google_shopping": { "title": "", "description": "", "brand": "", "condition": "new" },
+    "shopify": { "title": "", "meta_title": "max 60 caracteres", "meta_description": "max 155 caracteres", "tags": ["3 a 5 tags"] },
+    "google_shopping": { "title": "", "description": "", "gtin": "", "brand": "", "condition": "new", "color": "", "size": "" },
     "meta_ads": { "headline": "", "primary_text": "", "description": "" }
   },
   "cro_signals": { "urgency_present": true, "social_proof_present": true, "risk_reversal_present": true, "delivery_clarity": true },
-  "quality_score": <0-100>
+  "quality_score": 0
 }`,
       },
     ],
