@@ -141,6 +141,58 @@ export async function listProductsDetailed(shop: string, token: string, cap = 25
   return out;
 }
 
+// Produits avec prix + image, pour construire les cartes CRO (SCRO).
+export type CroProduct = { id: number; handle: string; title: string; image: string | null; price: string | null; compareAt: string | null };
+export async function listProductsWithPrice(shop: string, token: string, cap = 250): Promise<CroProduct[]> {
+  const out: CroProduct[] = [];
+  let pageInfo: string | null = null;
+  for (let i = 0; i < 20 && out.length < cap; i++) {
+    const url = new URL(`${apiBase(shop)}/products.json`);
+    url.searchParams.set("limit", "250");
+    if (pageInfo) url.searchParams.set("page_info", pageInfo);
+    const res = await fetch(url.toString(), { headers: { "X-Shopify-Access-Token": token }, cache: "no-store" });
+    if (!res.ok) break;
+    const data = await res.json();
+    for (const p of data.products || []) {
+      const v = (p.variants || [])[0] || {};
+      out.push({
+        id: p.id,
+        handle: p.handle,
+        title: p.title,
+        image: p.image?.src || (p.images?.[0]?.src ?? null),
+        price: v.price ?? null,
+        compareAt: v.compare_at_price ?? null,
+      });
+      if (out.length >= cap) break;
+    }
+    pageInfo = parseNextPageInfo(res.headers.get("link"));
+    if (!pageInfo) break;
+  }
+  return out;
+}
+
+export async function getShopCurrency(shop: string, token: string): Promise<string> {
+  try {
+    const res = await fetch(`${apiBase(shop)}/shop.json`, { headers: { "X-Shopify-Access-Token": token }, cache: "no-store" });
+    if (!res.ok) return "USD";
+    const d = await res.json();
+    return d.shop?.currency || "USD";
+  } catch {
+    return "USD";
+  }
+}
+
+export async function getDefaultBlogHandle(shop: string, token: string): Promise<string> {
+  try {
+    const res = await fetch(`${apiBase(shop)}/blogs.json`, { headers: { "X-Shopify-Access-Token": token }, cache: "no-store" });
+    if (!res.ok) return "news";
+    const d = await res.json();
+    return d.blogs?.[0]?.handle || "news";
+  } catch {
+    return "news";
+  }
+}
+
 export async function getProduct(shop: string, token: string, productId: string | number): Promise<ShopifyProduct | null> {
   const res = await fetch(`${apiBase(shop)}/products/${productId}.json`, {
     headers: { "X-Shopify-Access-Token": token },

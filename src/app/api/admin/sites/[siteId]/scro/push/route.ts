@@ -1,9 +1,13 @@
 import { NextRequest, NextResponse } from "next/server";
 import { isAdmin, unauthorized } from "@/lib/auth";
 import { getSiteContext } from "@/lib/site-context";
-import { listThemes, getThemeAsset, putThemeAsset } from "@/lib/shopify";
-import { buildScroLiquid, injectScro, defaultBranding } from "@/lib/cro/builder";
-import { NEUTRAL_ICONS } from "@/lib/cro/icon-generator";
+import {
+  listThemes, getThemeAsset, putThemeAsset,
+  listProductsWithPrice, listCollectionsLite, getShopCurrency,
+  getDefaultBlogId, getDefaultBlogHandle, listArticles,
+  type CroProduct,
+} from "@/lib/shopify";
+import { buildScroLiquid, injectScro, defaultBranding, type InlineItem, type SidebarResolved, type MiniProduct, type MiniLink } from "@/lib/cro/builder";
 
 export const runtime = "nodejs";
 export const dynamic = "force-dynamic";
@@ -11,7 +15,9 @@ export const maxDuration = 120;
 
 const DEFAULT_ASSET = "sections/main-article.liquid";
 
-// POST: build le Liquid CRO et l'injecte dans le theme actif (entre markers).
+// POST: resout les produits/collections/articles (images + prix reels) puis injecte
+// le <style> + <script> CRO dans le theme actif (entre markers). Style Yavok :
+// cartes produit positionnees dans le contenu de l'article.
 export async function POST(req: NextRequest, { params }: { params: { siteId: string } }) {
   if (!isAdmin(req)) return unauthorized();
   try {
@@ -19,7 +25,6 @@ export async function POST(req: NextRequest, { params }: { params: { siteId: str
     const { data: config } = await supabase.from("site_cro_configs").select("*").eq("site_id", params.siteId).maybeSingle();
     if (!config) return NextResponse.json({ error: "no_config" }, { status: 404 });
 
-    // theme cible : configure sinon theme principal (role=main)
     const themes = await listThemes(shop, token);
     const themeId = config.theme_id || themes.find((t) => t.role === "main")?.id || themes[0]?.id;
     if (!themeId) return NextResponse.json({ error: "no_theme" }, { status: 404 });
@@ -27,17 +32,79 @@ export async function POST(req: NextRequest, { params }: { params: { siteId: str
 
     const branding = defaultBranding(voice);
     const persona = { name: voice.author_name || voice.mascot || "", role: voice.author_role || "", bio: voice.author_bio || "" };
-    const icons = voice.sidebar_icons || NEUTRAL_ICONS;
 
-    const liquid = buildScroLiquid({
-      inlineEnabled: config.inline_enabled,
-      sidebarEnabled: config.sidebar_enabled,
-      blocks: config.blocks || [],
-      sidebarCfg: config.sidebar || null,
-      branding,
-      persona,
-      icons,
-    });
+    const inlineEnabled = !!config.inline_enabled;
+    const sidebarEnabled = !!config.sidebar_enabled;
+    const blocks: any[] = config.blocks || [];
+    const sb: any = config.sidebar || {};
+
+    const needProducts = inlineEnabled || (sidebarEnabled && sb.bestsellers?.enabled);
+    const needCollections = (inlineEnabled && blocks.some((b) => b.kind === "collection")) || (sidebarEnabled && sb.top_categories?.enabled);
+    const needArticles = sidebarEnabled && sb.top_articles?.enabled;
+
+    const currency = await getShopCurrency(shop, token);
+    let products: CroProduct[] = [];
+    if (needProducts) { try { products = await listProductsWithPrice(shop, token, 250); } catch { products = []; } }
+    const pMap = new Map(products.map((p) => [p.handle, p]));
+
+    let collections: { handle: string; title: string; image: string | null }[] = [];
+    if (needCollections) { try { collections = await listCollectionsLite(shop, token); } catch { collections = []; } }
+    const cMap = new Map(collections.map((c) => [c.handle, c]));
+
+    let articles: { handle: string; title: string; image: string | null }[] = [];
+    let blogHandle = "news";
+    if (needArticles) {
+      try {
+        const blogId = await getDefaultBlogId(shop, token);
+        blogHandle = await getDefaultBlogHandle(shop, token);
+        const list = await listArticles(shop, token, blogId, 50);
+        articles = list.map((a) => ({ handle: a.handle, title: a.title, image: a.image }));
+      } catch { articles = []; }
+    }
+    const aMap = new Map(articles.map((a) => [a.handle, a]));
+
+    // Blocs inline (produit ou collection) resolus
+    const inline: InlineItem[] = blocks
+      .map((b): InlineItem | null => {
+        if (b.kind === "collection") {
+          const c = cMap.get(b.handle);
+          if (!c) return null;
+          return { kind: "collection", position: b.position, label: b.label || "Notre selection", cta: b.cta || "Decouvrir", title: b.override_title || c.title, url: `/collections/${c.handle}`, image: c.image };
+        }
+        const p = pMap.get(b.handle);
+        if (!p) return null;
+        return { kind: "product", position: b.position, label: b.label || "Coup de coeur", cta: b.cta || "Voir le produit", title: b.override_title || p.title, url: `/products/${p.handle}`, image: p.image, price: p.price, compareAt: p.compareAt };
+      })
+      .filter((x): x is InlineItem => x !== null);
+
+    // Sidebar resolue
+    const bestHandles =
+      sb.bestsellers?.auto || !(sb.bestsellers?.manual_handles || []).filter(Boolean).length
+        ? products.slice(0, 3).map((p) => p.handle)
+        : sb.bestsellers.manual_handles;
+    const bestItems: MiniProduct[] = (bestHandles || [])
+      .map((h: string) => pMap.get(h))
+      .filter(Boolean)
+      .slice(0, 3)
+      .map((p: CroProduct) => ({ title: p.title, url: `/products/${p.handle}`, image: p.image, price: p.price, compareAt: p.compareAt }));
+
+    const catHandles = (sb.top_categories?.manual_handles || []).filter(Boolean).length ? sb.top_categories.manual_handles : collections.slice(0, 3).map((c) => c.handle);
+    const catItems: MiniLink[] = (catHandles || []).map((h: string) => cMap.get(h)).filter(Boolean).slice(0, 3).map((c: any) => ({ title: c.title, url: `/collections/${c.handle}`, image: c.image }));
+
+    const artHandles = (sb.top_articles?.manual_handles || []).filter(Boolean).length ? sb.top_articles.manual_handles : articles.slice(0, 3).map((a) => a.handle);
+    const artItems: MiniLink[] = (artHandles || []).map((h: string) => aMap.get(h)).filter(Boolean).slice(0, 3).map((a: any) => ({ title: a.title, url: `/blogs/${blogHandle}/${a.handle}`, image: a.image }));
+
+    const sidebar: SidebarResolved = {
+      lead_magnet: sb.lead_magnet?.enabled ? sb.lead_magnet : null,
+      bestsellers: sb.bestsellers?.enabled ? { enabled: true, title: sb.bestsellers.title || "Best-sellers", items: bestItems } : null,
+      categories: sb.top_categories?.enabled ? { enabled: true, title: sb.top_categories.title || "Nos univers", items: catItems } : null,
+      articles: sb.top_articles?.enabled ? { enabled: true, title: sb.top_articles.title || "A lire aussi", items: artItems } : null,
+      author: sb.author?.enabled
+        ? { ...sb.author, name: sb.author.name || persona.name, role: sb.author.role || persona.role, bio: sb.author.bio || persona.bio, image_url: sb.author.image_url || voice.author_photo_url || "" }
+        : null,
+    };
+
+    const liquid = buildScroLiquid({ inlineEnabled, sidebarEnabled, inline, sidebar, branding, currency });
 
     const current = (await getThemeAsset(shop, token, themeId, assetKey)) || "";
     const next = injectScro(current, liquid);
@@ -46,7 +113,7 @@ export async function POST(req: NextRequest, { params }: { params: { siteId: str
     try {
       await putThemeAsset(shop, token, themeId, assetKey, next);
       await supabase.from("site_cro_configs").update({ theme_id: String(themeId), target_asset_key: assetKey, last_pushed_at: now, last_push_status: "ok", last_push_error: null }).eq("site_id", params.siteId);
-      return NextResponse.json({ ok: true, theme_id: themeId, asset_key: assetKey });
+      return NextResponse.json({ ok: true, theme_id: themeId, asset_key: assetKey, inline_count: inline.length, sidebar: !!liquid });
     } catch (e) {
       const msg = e instanceof Error ? e.message : "push_failed";
       await supabase.from("site_cro_configs").update({ last_push_status: "error", last_push_error: msg, updated_at: now }).eq("site_id", params.siteId);
